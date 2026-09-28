@@ -53,7 +53,7 @@ You found a great model on **MakerWorld** or **Printables**, but the project was
 
 <div align="center">
 
-### [⬇ Get the latest `3MF-To-AD5X.exe`](https://github.com/iChristGit/3MF-to-AD5X/releases/latest)
+### [⬇ Get the latest version](https://github.com/iChristGit/3MF-to-AD5X/releases/latest)
 
 Single file · no install · no Python needed · just double-click
 
