@@ -1,12 +1,12 @@
 <div align="center">
 
-# 🖨️ 3MF to AD5X
+# 🖨️ Bambu2AD5X
 
 ### Turn **any** 3MF into an **AD5X-ready OrcaSlicer project** in one click
 
 *MakerWorld · Bambu Studio · OrcaSlicer · Printables (PrusaSlicer) → Flashforge AD5X*
 
-![Version](https://img.shields.io/badge/version-5.0.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![Python](https://img.shields.io/badge/python-3.8+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![OrcaSlicer](https://img.shields.io/badge/OrcaSlicer-2.4.2-2ea44f?style=for-the-badge)
@@ -96,7 +96,7 @@ Prefer to build it yourself? See [Build from source](#-build-from-source).
 
 ## 🎛️ Features
 
-### 🖥️ Modern GUI (v5)
+### 🖥️ Modern GUI
 - Gradient header, cards, rounded buttons, **light + dark mode** (follows Windows on first run)
 - **Big live preview** with chips: source, layer height, filaments + material
 - Shows *"Bambu Lab P1S → Flashforge AD5X"*, warnings, and the exact output path
