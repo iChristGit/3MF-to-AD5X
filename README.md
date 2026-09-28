@@ -6,7 +6,6 @@
 
 *MakerWorld · Bambu Studio · OrcaSlicer · Printables (PrusaSlicer) → Flashforge AD5X*
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![Python](https://img.shields.io/badge/python-3.8+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![OrcaSlicer](https://img.shields.io/badge/OrcaSlicer-2.4.2-2ea44f?style=for-the-badge)
@@ -176,7 +175,6 @@ python bambu2ad5x.py model.3mf -o out.3mf            # custom output (single inp
 python bambu2ad5x.py model.3mf --overwrite           # replace the original (safe swap)
 python bambu2ad5x.py model.3mf --keep-unused-filaments
 python bambu2ad5x.py model.3mf --template my_ad5x_project.3mf
-python bambu2ad5x.py --version
 ```
 
 | Option | Description |
