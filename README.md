@@ -10,7 +10,7 @@
 
 <br>
 
-[![Download](https://img.shields.io/badge/⬇%20Download-Windows%20.exe-2ea44f?style=for-the-badge)](https://github.com/iChristGit/3MF-to-AD5X/releases/latest)
+[![Download](https://img.shields.io/badge/⬇%20Download-Windows%20.exe-2ea44f?style=for-the-badge)](https://github.com/iChristGit/3MF-to-AD5X/releases/download/v1.0.0/3MF-To-AD5X.exe)
 [![Issues](https://img.shields.io/badge/Found%20a%20bug%3F-Open%20an%20issue-d73a4a?style=for-the-badge)](https://github.com/iChristGit/3MF-to-AD5X/issues)
 [![PRs](https://img.shields.io/badge/PRs-welcome-8957e5?style=for-the-badge)](https://github.com/iChristGit/3MF-to-AD5X/pulls)
 
