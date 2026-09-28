@@ -15,7 +15,7 @@
 
 <br>
 
-<img src="(https://github.com/user-attachments/assets/150f5573-2ae2-420a-9e50-084a04613311)" alt="Bambu2AD5X - turn any 3MF into an AD5X-ready OrcaSlicer project" width="900">
+<img src="docs/hero.png" alt="Bambu2AD5X - turn any 3MF into an AD5X-ready OrcaSlicer project" width="900">
 
 </div>
 
