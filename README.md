@@ -61,7 +61,7 @@ You found a great model on **MakerWorld** or **Printables**, but the project fil
 
 ## 📥 Download
 
-Grab the ready-to-run **`Bambu2AD5X.exe`** from the [**Releases**](../../releases) page (or from this repo).
+Grab the ready-to-run **`Bambu2AD5X.exe`** from the [**Releases**](../../releases) page.
 It is a single file, needs no installation and no Python, and has everything built in. Just double-click it.
 
 Prefer to build it yourself? See [Build from source](#-build-from-source).
@@ -139,8 +139,8 @@ Prefer to build it yourself? See [Build from source](#-build-from-source).
 You need **Windows** (tested on Windows 11) and **Python 3.8+** ([python.org](https://www.python.org/downloads/), tick *"Add python.exe to PATH"*).
 
 ```bat
-git clone https://github.com/<your-username>/Bambu2AD5X.git
-cd Bambu2AD5X
+git clone https://github.com/iChristGit/3MF-to-AD5X.git
+cd 3MF-to-AD5X
 build_exe.bat
 ```
 
@@ -238,13 +238,16 @@ Built and tested for the **AD5X** on **Windows 11** only. Other Flashforge print
 ## 📁 Project structure
 
 ```
-Bambu2AD5X/
+3MF-to-AD5X/
+├── docs/
+│   ├── hero.png           # README banner
+│   └── screenshot.png     # app screenshot
 ├── bambu2ad5x.py          # conversion engine (stdlib only) + CLI
 ├── bambu2ad5x_gui.py      # Tkinter GUI
 ├── ad5x_template.json     # AD5X 0.4 nozzle machine template
 ├── build_exe.bat          # builds Bambu2AD5X.exe with PyInstaller
 ├── run_gui.bat            # runs the GUI without building
-├── Bambu2AD5X.exe         # prebuilt Windows executable
+├── LICENSE
 └── README.md
 ```
 
@@ -268,6 +271,12 @@ Contributions of any size are welcome, from a typo to a whole new platform build
 4. The generated `.report.txt` and the log output
 
 **Pull requests:** keep the engine (`bambu2ad5x.py`) dependency-free, and mention which printer/OS/files you tested with.
+
+---
+
+## 📄 License
+
+Released under the [MIT License](LICENSE).
 
 ---
 
