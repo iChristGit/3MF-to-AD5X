@@ -11,7 +11,6 @@
 ![Python](https://img.shields.io/badge/python-3.8+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![OrcaSlicer](https://img.shields.io/badge/OrcaSlicer-2.4.2-2ea44f?style=for-the-badge)
 ![Dependencies](https://img.shields.io/badge/core%20deps-none-brightgreen?style=for-the-badge)
-![Vibe coded](https://img.shields.io/badge/vibe%20coded%20with-Claude-D97757?style=for-the-badge)
 
 <br>
 
@@ -32,7 +31,7 @@
 > | **Other Flashforge machines** | ❓ Untested, should work as a starting point |
 >
 > ### 🤝 Help make this better
-> This is a community, vibe-coded project, so it *will* have bugs and gaps. If you find:
+> This is a community project, so it *will* have bugs and gaps. If you find:
 > - 🐛 **a bug** or a file that fails to convert,
 > - 💡 **an improvement**, or
 > - 🔍 **a value that is not consistent with the author's original settings or with what the AD5X actually does**,
@@ -275,7 +274,7 @@ Contributions of any size are welcome, from a typo to a whole new platform build
 ## 🙏 Credits
 
 - 🌐 **[ForgeBridge](https://forgebridge.app)**: the website that inspired this project and can also convert files online. Go check it out!
-- 🤖 **Built with [Claude](https://claude.ai) by Anthropic**: this project was **vibe coded** end to end.
+- 🤖 Vibe coded with [Claude](https://claude.ai).
 - 🧡 **[OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)** for the slicer and its open Flashforge profiles.
 
 ---
