@@ -1,124 +1,143 @@
 <div align="center">
 
-# 🖨️ Bambu2AD5X
+<img src="docs/hero.png" alt="3MF To AD5X - turn any 3MF into an AD5X-ready OrcaSlicer project" width="900">
 
-### Turn **any** 3MF into an **AD5X-ready OrcaSlicer project** in one click
+<br><br>
 
-*MakerWorld · Bambu Studio · OrcaSlicer · Printables (PrusaSlicer) → Flashforge AD5X*
+# 🖨️ 3MF To AD5X
 
-![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white)
-![Python](https://img.shields.io/badge/python-3.8+-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![OrcaSlicer](https://img.shields.io/badge/OrcaSlicer-2.4.2-2ea44f?style=for-the-badge)
-![Dependencies](https://img.shields.io/badge/core%20deps-none-brightgreen?style=for-the-badge)
+**Drop in any 3MF. Get an AD5X-ready OrcaSlicer project. Keep the author's settings.**
 
 <br>
 
-<img src="docs/hero.png" alt="Bambu2AD5X - turn any 3MF into an AD5X-ready OrcaSlicer project" width="900">
+[![Download](https://img.shields.io/badge/⬇%20Download-Windows%20.exe-2ea44f?style=for-the-badge)](https://github.com/iChristGit/3MF-to-AD5X/releases/latest)
+[![Issues](https://img.shields.io/badge/Found%20a%20bug%3F-Open%20an%20issue-d73a4a?style=for-the-badge)](https://github.com/iChristGit/3MF-to-AD5X/issues)
+[![PRs](https://img.shields.io/badge/PRs-welcome-8957e5?style=for-the-badge)](https://github.com/iChristGit/3MF-to-AD5X/pulls)
+
+![Printer](https://img.shields.io/badge/printer-Flashforge%20AD5X-ff6a00?style=flat-square)
+![Slicer](https://img.shields.io/badge/OrcaSlicer-2.4.2-2ea44f?style=flat-square)
+![Platform](https://img.shields.io/badge/tested%20on-Windows%2011-0078D6?style=flat-square&logo=windows&logoColor=white)
+![Python](https://img.shields.io/badge/python-3.8+-3776AB?style=flat-square&logo=python&logoColor=white)
+![Deps](https://img.shields.io/badge/core%20deps-none-brightgreen?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
+
+<br>
+
+[**Download**](#-download) · [**Quick start**](#-quick-start) · [**Sources**](#-supported-sources) · [**Features**](#-features) · [**Command line**](#-command-line) · [**How it works**](#-how-it-works) · [**Contribute**](#-contributing)
 
 </div>
 
----
+<br>
 
-## 📢 Important: please read
-
-> ### 🧪 Current testing status
-> | | Status |
-> |---|---|
-> | **Printer** | ✅ Flashforge **AD5X** only |
-> | **OS** | ✅ **Windows 11** only |
-> | **Linux / macOS** | ❌ Not tested. **Contributors wanted!** |
-> | **Other Flashforge machines** | ❓ Untested, should work as a starting point |
->
-> ### 🤝 Help make this better
-> This is a community project, so it *will* have bugs and gaps. If you find:
-> - 🐛 **a bug** or a file that fails to convert,
-> - 💡 **an improvement**, or
-> - 🔍 **a value that is not consistent with the author's original settings or with what the AD5X actually does**,
->
-> please **[open an issue](../../issues)** or, even better, **[send a pull request](../../pulls)**. Getting every value right for both the author's intent *and* real printer behaviour is the main goal, and it needs many eyes and many test files.
->
-> ### 🐧 Linux & macOS
-> The conversion engine is pure Python (standard library only) and the GUI uses Tkinter, so it *should* run on Linux and macOS with `python bambu2ad5x_gui.py`. But nobody has tested it, and the build scripts are Windows-only (`.bat`). If you can test or add a `build_exe.sh` / AppImage / macOS build, **please contribute!**
+> [!IMPORTANT]
+> **Tested on the Flashforge AD5X + Windows 11 only.** Linux, macOS and other Flashforge machines are untested and **contributors are very welcome**. If you find a bug, or a value that doesn't match the author's original settings or what the AD5X really does, please [open an issue](https://github.com/iChristGit/3MF-to-AD5X/issues) or send a PR.
 
 ---
 
-## ✨ What is this?
+## ✨ Why?
 
-You found a great model on **MakerWorld** or **Printables**, but the project file was made for a Bambu Lab printer (or PrusaSlicer). Opening it in OrcaSlicer with a Flashforge AD5X gives you the wrong printer profile, wrong G-code, wrong speeds, and usually loses the author's carefully tuned settings.
+You found a great model on **MakerWorld** or **Printables**, but the project was made for another printer. Open it in OrcaSlicer with an AD5X and you get the wrong machine profile, wrong G-code, wrong speeds, and the author's carefully tuned settings quietly replaced by defaults.
 
-**Bambu2AD5X** fixes that. Drop in a `.3mf`, click **Convert**, and get a new project that:
-
-- ✅ Uses the **Flashforge AD5X 0.4 nozzle** machine profile (start/end G-code, limits, build area)
-- ✅ **Keeps the author's settings**: layers, walls, infill, supports, seam, brim, ironing, fuzzy skin, temperatures, colours, painted colours/supports/seams
-- ✅ Uses **AD5X-appropriate speeds**, matched to the layer height
-- ✅ Picks the right **AD5X filament preset** by material type (PLA → PLA Basic, PETG → PETG Pro, ...)
-- ✅ Opens straight in **OrcaSlicer 2.4.2**, ready to slice
-
-> **Tested on the Flashforge AD5X.** It should also work as a starting point for other Flashforge machines (see [Other Flashforge machines](#-other-flashforge-machines)).
+| | ❌ Opening the raw 3MF | ✅ After 3MF To AD5X |
+|---|---|---|
+| **Printer profile** | Bambu / Prusa machine | Flashforge AD5X 0.4 nozzle |
+| **Start / end G-code** | Wrong printer | AD5X G-code |
+| **Speeds** | Made for another printer | AD5X speeds, matched to the layer height |
+| **Author's settings** | Silently swapped for defaults | Kept (walls, infill, supports, seam, brim, ...) |
+| **Filament preset** | Unknown / missing | AD5X preset by material (PLA → PLA Basic, ...) |
+| **Unused filaments** | Clutter | Removed and renumbered |
 
 ---
 
 ## 📥 Download
 
-Grab the ready-to-run **`Bambu2AD5X.exe`** from the [**Releases**](../../releases) page.
-It is a single file, needs no installation and no Python, and has everything built in. Just double-click it.
+<div align="center">
 
-Prefer to build it yourself? See [Build from source](#-build-from-source).
+### [⬇ Get the latest `3MF-To-AD5X.exe`](https://github.com/iChristGit/3MF-to-AD5X/releases/latest)
+
+Single file · no install · no Python needed · just double-click
+
+</div>
+
+Prefer to build it yourself? Jump to [Build from source](#-build-from-source).
 
 ---
 
-## 🚀 How to use
+## 🚀 Quick start
 
-1. **Add files**: click *Add files*, or **drag & drop** `.3mf` files / whole folders into the window.
-2. **Tick** the ones you want to convert (or *Check all*).
-3. **Choose the output**: next to each file, into a folder, or replace the originals.
-4. Click **Convert**.
-5. In **OrcaSlicer 2.4.2**, open the result with **`File → Open Project`**.
+<table>
+<tr>
+<td align="center" width="20%"><h3>1️⃣</h3><b>Add</b><br>files or drag & drop folders</td>
+<td align="center" width="20%"><h3>2️⃣</h3><b>Tick</b><br>what to convert</td>
+<td align="center" width="20%"><h3>3️⃣</h3><b>Choose</b><br>where the output goes</td>
+<td align="center" width="20%"><h3>4️⃣</h3><b>Convert</b><br>one click</td>
+<td align="center" width="20%"><h3>5️⃣</h3><b>Open</b><br>in OrcaSlicer</td>
+</tr>
+</table>
 
-> ⚠️ **Do not drag the converted file into OrcaSlicer.** Use *File → Open Project*, otherwise the project profile may not load correctly.
+> [!WARNING]
+> In OrcaSlicer 2.4.2 open the result with **`File → Open Project`**. **Do not drag it into the window**, or the project profile may not load correctly.
+
+```mermaid
+flowchart LR
+    A["📦 Any project 3MF<br/>MakerWorld · Bambu · Orca · Printables"] --> C{{"🔧 3MF To AD5X"}}
+    B["🖨️ AD5X machine template"] --> C
+    C --> D["✅ AD5X-ready 3MF"]
+    D --> E["🎨 OrcaSlicer 2.4.2<br/>File → Open Project"]
+```
 
 ---
 
 ## 🧩 Supported sources
 
-| Source | How to get the file | Status |
-|---|---|---|
+| Source | How to get the file | |
+|---|---|:-:|
 | **MakerWorld** | Download the *print profile* 3MF | ✅ |
-| **Bambu Studio** projects | Saved `.3mf` project | ✅ |
-| **OrcaSlicer** projects | Saved `.3mf` project | ✅ |
+| **Bambu Studio** | Saved `.3mf` project | ✅ |
+| **OrcaSlicer** | Saved `.3mf` project | ✅ |
 | **Printables** | Open the model → **Download** the project the designer saved in PrusaSlicer | ✅ |
-| Creality Cloud, Snapmaker Space, makeronline, Meshy ... | Any Bambu/Orca-style project 3MF | ✅ (should work) |
+| Creality Cloud, Snapmaker Space, makeronline, Meshy … | Any Bambu/Orca-style project 3MF | 🟡 should work |
 
+> [!NOTE]
 > A plain mesh-only 3MF (no slicer project inside) has no settings to carry over. The geometry still works, but there is nothing to preserve.
 
 ---
 
-## 🎛️ Features
+## 🎛 Features
 
-### 🖥️ Modern GUI
-- Gradient header, cards, rounded buttons, **light + dark mode** (follows Windows on first run)
-- **Big live preview** with chips: source, layer height, filaments + material
-- Shows *"Bambu Lab P1S → Flashforge AD5X"*, warnings, and the exact output path
-- File list with **thumbnails**, sortable columns, **live search**, filters (*All / Ready / Converted / Can't convert*)
-- **Right-click menu**: tick, show in folder, copy path, remove
-- **Drag & drop** files and folders
-- Files are read in the **background**, so big folders never freeze the window
-- Built-in log panel, progress bar, total time, and an *Open output folder* button
-- Remembers window size and all your settings
-- **"How it works"** window and tooltips on every option
+<table>
+<tr>
+<td width="50%" valign="top">
 
-### ⚙️ Conversion engine
-- Rebuilds `different_settings_to_system` so OrcaSlicer **keeps the author's values** instead of silently swapping in system defaults
-- Machine half (printer profile, G-code, limits, build area) comes from an AD5X template; the author's half is copied over
-- **Speeds always replaced by AD5X values**, matched to the layer height (interpolated between 0.16 / 0.20 / 0.24)
-- **Drops unused filaments** (like the web converter) and renumbers everything consistently
-- **Prime tower** follows the model, and you get a warning if it would overlap the object
-- Model is centred by its **real bounding box**
-- Temperatures are capped to AD5X limits (nozzle 280 °C, bed 110 °C)
-- Geometry, painted colours, supports and seams are **never touched** (bit-for-bit)
-- Optional `.report.txt` listing what was kept, replaced and discarded
+### 🖥 Modern GUI
+- Gradient header, cards, **light + dark mode**
+- **Live preview** with source, layer height, filaments + material
+- File list with **thumbnails**, sorting, **search** and filters
+- **Drag & drop** files and whole folders
+- Right-click menu, log panel, progress bar
+- Big folders load in the background
+- Remembers window size and settings
 
-### ⌨️ Shortcuts
+</td>
+<td width="50%" valign="top">
+
+### ⚙ Conversion engine
+- Rebuilds `different_settings_to_system` so Orca **keeps the author's values**
+- **AD5X speeds** matched to the layer height
+- **Drops unused filaments**, renumbers everything
+- **Prime tower** follows the model, overlap warning
+- Model centred by its **real bounding box**
+- Temperatures capped to AD5X limits
+- Geometry, paint, supports and seams are **never touched**
+
+</td>
+</tr>
+</table>
+
+<details>
+<summary><b>⌨ Keyboard shortcuts</b></summary>
+
+<br>
 
 | Shortcut | Action |
 |---|---|
@@ -131,9 +150,11 @@ Prefer to build it yourself? See [Build from source](#-build-from-source).
 | `Space` | Tick / untick |
 | `Del` | Remove from list |
 
+</details>
+
 ---
 
-## 🛠️ Build from source
+## 🛠 Build from source
 
 You need **Windows** (tested on Windows 11) and **Python 3.8+** ([python.org](https://www.python.org/downloads/), tick *"Add python.exe to PATH"*).
 
@@ -143,15 +164,14 @@ cd 3MF-to-AD5X
 build_exe.bat
 ```
 
-`build_exe.bat` installs PyInstaller (plus the optional extras), builds the exe in about a minute, and leaves **`Bambu2AD5X.exe`** in the folder. You can copy that one file anywhere.
+`build_exe.bat` installs PyInstaller and the optional extras, builds in about a minute, and leaves **`3MF-To-AD5X.exe`** in the folder. Copy that one file anywhere.
 
-**Just want to run it without building?**
+Just want to run it without building? Use `run_gui.bat`.
 
-```bat
-run_gui.bat
-```
+<details>
+<summary><b>Optional extras</b> (auto-detected, the app works without them)</summary>
 
-**Optional extras** (auto-detected, the app works without them):
+<br>
 
 | Package | Gives you |
 |---|---|
@@ -162,20 +182,27 @@ run_gui.bat
 pip install pillow tkinterdnd2
 ```
 
+</details>
+
 ---
 
 ## 💻 Command line
 
-The converter also works without the GUI, using only the Python standard library:
+No GUI needed. The engine uses only the Python standard library.
 
 ```bash
-python bambu2ad5x.py model.3mf                       # -> model_AD5X.3mf (+ .report.txt)
-python bambu2ad5x.py *.3mf                           # batch convert
-python bambu2ad5x.py model.3mf -o out.3mf            # custom output (single input)
-python bambu2ad5x.py model.3mf --overwrite           # replace the original (safe swap)
+python bambu2ad5x.py model.3mf                        # -> model_AD5X.3mf
+python bambu2ad5x.py *.3mf                            # batch convert
+python bambu2ad5x.py model.3mf -o out.3mf             # custom output (single input)
+python bambu2ad5x.py model.3mf --overwrite            # replace the original (safe swap)
 python bambu2ad5x.py model.3mf --keep-unused-filaments
 python bambu2ad5x.py model.3mf --template my_ad5x_project.3mf
 ```
+
+<details>
+<summary><b>All options</b></summary>
+
+<br>
 
 | Option | Description |
 |---|---|
@@ -185,21 +212,26 @@ python bambu2ad5x.py model.3mf --template my_ad5x_project.3mf
 | `--overwrite` | Replace the original. Built in a temp file and swapped in only on success, so a failure never damages your file |
 | `--keep-unused-filaments` | Don't remove filaments the model doesn't use |
 
+</details>
+
 ---
 
 ## 🔬 How it works
 
-OrcaSlicer loads a project's print/filament/printer preset **by name**. For every key that is *not* listed in `different_settings_to_system`, it silently swaps in the installed system preset's value, so the author's tuning gets lost.
+OrcaSlicer loads a project's print / filament / printer preset **by name**. For every key that is *not* listed in `different_settings_to_system`, it silently swaps in the installed system preset's value, so the author's tuning gets lost.
 
-Bambu2AD5X:
+3MF To AD5X:
 
 1. Takes the **machine half** (printer profile, G-code, limits, build area) from a bundled **AD5X template** (`ad5x_template.json`).
 2. Copies the **author's half** (layers, walls, infill, supports, seam, brim, ironing, fuzzy skin, prime tower, temperatures, colours, painting).
 3. Rebuilds `different_settings_to_system` so Orca **keeps** those values.
-4. Replaces speeds with AD5X-appropriate ones for the layer height, removes unused filaments, repositions the prime tower.
+4. Replaces speeds with AD5X-appropriate ones, removes unused filaments, repositions the prime tower.
 5. Writes a new `.3mf` and leaves the geometry untouched.
 
-### Speeds by layer height
+<details>
+<summary><b>Speeds by layer height</b></summary>
+
+<br>
 
 | Layer | Sparse infill | Internal solid | Gap infill |
 |---|---|---|---|
@@ -207,20 +239,33 @@ Bambu2AD5X:
 | 0.20 mm | 270 | 250 | 200 |
 | 0.24 mm | 230 | 230 | 180 |
 
-Heights in between are interpolated; outside 0.16–0.24 the nearest preset is used and a note is added.
+Heights in between are interpolated. Outside 0.16–0.24 the nearest preset is used and a note is added.
 
-### Printables / PrusaSlicer files
+</details>
+
+<details>
+<summary><b>Printables / PrusaSlicer files</b></summary>
+
+<br>
+
 Settings are mapped to Orca names (walls, infill, supports, seam, brim, ironing, temps, bed temps, colours, per-object/part extruders, painted colours/supports/seam). Modifier and support-blocker volumes are skipped and reported.
+
+</details>
 
 ---
 
 ## 🧵 Other Flashforge machines
 
-Built and tested for the **AD5X** on **Windows 11** only. Other Flashforge printers should work as a starting point, but bed size, limits and G-code may differ. To target a different machine, save an empty project for it in OrcaSlicer and pass it with `--template my_project.3mf`. Please report how it goes in the Issues tab.
+Built and tested for the **AD5X** only. Other Flashforge printers should work as a starting point, but bed size, limits and G-code may differ. To target a different machine, save an empty project for it in OrcaSlicer and pass it with `--template my_project.3mf`. Please report how it goes in the [Issues](https://github.com/iChristGit/3MF-to-AD5X/issues) tab.
 
 ---
 
 ## ❓ Troubleshooting
+
+<details>
+<summary><b>Show common problems</b></summary>
+
+<br>
 
 | Problem | Fix |
 |---|---|
@@ -231,9 +276,40 @@ Built and tested for the **AD5X** on **Windows 11** only. Other Flashforge print
 | Build says Python not found | Reinstall Python with *Add to PATH* ticked |
 | Windows SmartScreen warns about the exe | It's an unsigned PyInstaller build. Build it yourself from source if you prefer |
 
+</details>
+
 ---
 
-## 📁 Project structure
+## 🤝 Contributing
+
+This is a community project and it needs more eyes and more test files. Contributions of any size are welcome.
+
+| | How you can help |
+|---|---|
+| 🧪 | **Test more files** from different sources and check the result in OrcaSlicer 2.4.2 |
+| 🔍 | **Verify values** against the author's original *and* real AD5X behaviour (speeds, temps, G-code, flush volumes, prime tower) |
+| 🐧 | **Linux / macOS**: testing, fixes, `build_exe.sh`, AppImage, macOS build |
+| 🖨️ | **Other Flashforge printers**: templates and test results |
+| 🌍 | **Docs & translations** |
+
+<details>
+<summary><b>What to include in an issue</b></summary>
+
+<br>
+
+1. Where the 3MF came from (MakerWorld, Printables, …) and a link if possible
+2. Your OS and Python version (or that you used the exe)
+3. What you expected vs what happened
+4. The generated `.report.txt` and the log output
+
+**Pull requests:** keep the engine (`bambu2ad5x.py`) dependency-free and mention which printer / OS / files you tested with.
+
+</details>
+
+<details>
+<summary><b>Project structure</b></summary>
+
+<br>
 
 ```
 3MF-to-AD5X/
@@ -243,56 +319,31 @@ Built and tested for the **AD5X** on **Windows 11** only. Other Flashforge print
 ├── bambu2ad5x.py          # conversion engine (stdlib only) + CLI
 ├── bambu2ad5x_gui.py      # Tkinter GUI
 ├── ad5x_template.json     # AD5X 0.4 nozzle machine template
-├── build_exe.bat          # builds Bambu2AD5X.exe with PyInstaller
+├── build_exe.bat          # builds 3MF-To-AD5X.exe with PyInstaller
 ├── run_gui.bat            # runs the GUI without building
 ├── LICENSE
 └── README.md
 ```
 
----
-
-## 🤝 Contributing
-
-Contributions of any size are welcome, from a typo to a whole new platform build.
-
-**Good ways to help:**
-- 🧪 **Test more files**: convert models from different sources and check the result in OrcaSlicer 2.4.2. Report anything that looks off.
-- 🔍 **Verify values**: compare converted settings against the author's original *and* against real AD5X behaviour (speeds, temperatures, G-code, flush volumes, prime tower). Wrong or inconsistent values are the most valuable bugs to report.
-- 🐧 **Linux / macOS support**: testing, fixes, and build scripts.
-- 🖨️ **Other Flashforge printers**: templates and test results.
-- 🌍 **Docs & translations**.
-
-**When opening an issue, please include:**
-1. Where the 3MF came from (MakerWorld, Printables, ...) and a link if possible
-2. Your OS and Python version (or that you used the exe)
-3. What you expected vs what happened
-4. The generated `.report.txt` and the log output
-
-**Pull requests:** keep the engine (`bambu2ad5x.py`) dependency-free, and mention which printer/OS/files you tested with.
-
----
-
-## 📄 License
-
-Released under the [MIT License](LICENSE).
+</details>
 
 ---
 
 ## 🙏 Credits
 
-- 🌐 **[ForgeBridge](https://forgebridge.app)**: the website that inspired this project and can also convert files online. Go check it out!
-- 🤖 Vibe coded with [Claude](https://claude.ai).
+- 🌐 **[ForgeBridge](https://forgebridge.app)** — the website that inspired this project, and it can convert files online too. Go check it out!
 - 🧡 **[OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)** for the slicer and its open Flashforge profiles.
+- 🤖 Vibe coded with [Claude](https://claude.ai).
 
----
+## ⚖ License & disclaimer
 
-## ⚠️ Disclaimer
+Released under the [MIT License](LICENSE).
 
-This is an unofficial community tool, not affiliated with Flashforge, Bambu Lab, Prusa, OrcaSlicer or ForgeBridge. Converted profiles are a best effort: **always check the result in the slicer preview** before printing, and keep a backup of your originals (especially if you use *Replace originals*). Use at your own risk.
-
----
+This is an unofficial community tool, not affiliated with Flashforge, Bambu Lab, Prusa, OrcaSlicer or ForgeBridge. Converted profiles are a best effort: **always check the result in the slicer preview** before printing, and keep a backup of your originals (especially with *Replace originals*). Use at your own risk.
 
 <div align="center">
+
+<br>
 
 **If this saved you time, drop a ⭐ on the repo!**
 
