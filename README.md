@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🖨️ Bambu2AD5X
+# 🖨️ 3MF to AD5X
 
 ### Turn **any** 3MF into an **AD5X-ready OrcaSlicer project** in one click
 
