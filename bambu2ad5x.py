@@ -398,6 +398,8 @@ REPORT_REPLACED = set("""filament_adhesiveness_category filament_change_length f
     filament_notes filament_printable filament_retract_before_wipe filament_retract_restart_extra
     filament_retract_when_changing_layer filament_retraction_distances_when_cut filament_retraction_length
     filament_retraction_minimum_travel filament_self_index filament_settings_id filament_shrink filament_soluble
+    filament_tower_interface_pre_extrusion_dist filament_tower_interface_pre_extrusion_length
+    filament_tower_interface_print_temp filament_tower_interface_purge_volume filament_tower_ironing_area
     filament_vendor filament_wipe filament_wipe_distance filament_z_hop filament_z_hop_types
     raft_first_layer_expansion tree_support_wall_count""".split())
 REPORT_COPIED_IDS = {"from", "name", "filament_map"}   # counted as copied by the web converter
@@ -454,7 +456,13 @@ def fil_vector(v, nfil, self_index, variants):
     return v + [v[-1]] * (nfil - len(v)) if v else v
 
 
+# keys the web converter leaves in the author's own list form (["1"]) although the AD5X template stores a scalar
+KEEP_AUTHOR_SHAPE = {"top_solid_infill_flow_ratio"}
+
+
 def adapt(key, sv, tv, nfil, si, fv):
+    if key in KEEP_AUTHOR_SHAPE and isinstance(sv, list) and not isinstance(tv, list):
+        return sv
     if isinstance(tv, list):
         if isinstance(sv, list):
             if key in FILAMENT_OPTS:
@@ -482,7 +490,7 @@ def fmt(x, nd=6):
 WEB_MULTI_COLOUR = "#26A69A"      # what the web converter writes to filament_multi_colour (inert for single-colour filaments)
 
 
-def build_diff_lists(copied, nfil):
+def build_diff_lists(copied, nfil, flag_skip_flush=False):
     """[process, filament 1..N, printer].  Orca takes every key that is NOT listed from the installed AD5X system
     preset, so we list EVERY key we copied from the author: no value can ever be lost, whatever Orca version is
     installed.  (Extra keys that happen to equal the preset are harmless.)
@@ -490,7 +498,8 @@ def build_diff_lists(copied, nfil):
     the printer preset as modified and pop up 'Transfer or discard changes'.  best_object_pos goes into the process
     slot, exactly where the web converter puts it."""
     proc = sorted(k for k in copied if k in PRINT_OPTS or k in EXTRA_PROCESS or k == "best_object_pos")
-    proc = [k for k in proc if k != "support_object_skip_flush"]
+    # like the web converter: support_object_skip_flush is only flagged when the author changed it from the AD5X default
+    proc = [k for k in proc if k != "support_object_skip_flush" or flag_skip_flush]
     fil = sorted(k for k in copied if k in FILAMENT_OPTS)
     return [";".join(proc)] + [";".join(fil)] * nfil + [""]
 
@@ -940,6 +949,20 @@ def _has_paint(zin, name):
             tail = buf[-32:]
 
 
+def _has_paint_supports(zin, name):
+    """True if a model file contains hand-painted support data (streamed, the mesh can be 100+ MB)."""
+    tail = b""
+    with zin.open(name) as f:
+        while True:
+            chunk = f.read(1 << 22)
+            if not chunk:
+                return False
+            buf = tail + chunk
+            if re.search(rb'paint_supports="[^"]', buf):
+                return True
+            tail = buf[-32:]
+
+
 _TAG_RE = re.compile(rb"<(object|triangle|component)\b([^>]*)>")
 _PAINT_RE = re.compile(rb'\b(?:paint_color|mmu_segmentation)="([^"]*)"')
 _UNPAINTED = (0,)
@@ -1312,9 +1335,6 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
     nfil = len(S["filament_colour"])
     si = S.get("filament_self_index") or [str(i + 1) for i in range(nfil)]
     fv = S.get("filament_extruder_variant") or ["Direct Drive Standard"] * len(si)
-    if nfil > 4:
-        rep["warn"].append(f"{nfil} filaments defined but the AD5X IFS has 4 slots - "
-                           "assign/merge colours in Orca before slicing.")
 
     # 1) resize the per-filament vectors of the template to the project's filament count
     for k, v in R.items():
@@ -1441,7 +1461,10 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
     # 5) rebuild different_settings_to_system: [process, filament1..N, printer]  (see build_diff_lists)
     if PIN_BASE_PRESET and not keep_speeds:
         copied_keys |= {k for k in ("sparse_infill_speed", "internal_solid_infill_speed", "gap_infill_speed") if k in R}
-    R["different_settings_to_system"] = build_diff_lists(copied_keys, nfil)
+    R["different_settings_to_system"] = build_diff_lists(
+        copied_keys, nfil,
+        "support_object_skip_flush" in copied_keys
+        and str(first(R.get("support_object_skip_flush", "0"))) != str(first(T.get("support_object_skip_flush", "0"))))
 
     sd = S.get("different_settings_to_system")
     if isinstance(sd, list):
@@ -1480,6 +1503,9 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
                                             "unused one(s) were removed so they don't show up in the slicer"
                                             + (" (prime tower switched off - nothing to purge)." if len(keep_idx) == 1 else "."))
         nfil_out = len(keep_idx) if keep_idx else nfil
+        if nfil_out > 4:
+            rep["warn"].append(f"{nfil_out} filaments defined but the AD5X IFS has 4 slots - "
+                               "assign/merge colours in Orca before slicing.")
 
         plates = {}
         if not prusa and "Metadata/model_settings.config" in names:
@@ -1532,6 +1558,13 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
         sd0 = S.get("different_settings_to_system")
         author_proc = set(str(sd0[0]).split(";")) if isinstance(sd0, list) and sd0 else set()
         mirror = {k: first(R[k]) for k in ("enable_support",) if k in author_proc and k in R}
+        if not prusa and str(first(R.get("enable_support", "0"))) in ("0", "false") and any(
+                n.endswith(".model") and _has_paint_supports(zin, n) for n in names):
+            # like the web converter: hand-painted supports only exist when support generation is on
+            R["enable_support"] = "1"
+            mirror["enable_support"] = "1"
+            rep["notes"].append("The model has hand-painted supports but support generation was off: it was turned on "
+                                "(enable_support) so those supports exist when slicing.")
 
         # prime tower: one position per plate, same offset as that plate, kept fully inside the plate
         tw = num(R.get("prime_tower_width")) or 35.0
