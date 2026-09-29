@@ -37,8 +37,14 @@ set EXTRA=
 %PY% -c "import PIL.ImageTk" >nul 2>nul && set EXTRA=%EXTRA% --hidden-import PIL.ImageTk
 echo Extras for this build: %EXTRA%
 
+if not exist "assets\appicon.ico" (
+  echo assets\appicon.ico is missing - run:  python assets\make_icon.py
+  pause
+  exit /b 1
+)
+
 echo Building exe (takes about a minute)...
-%PY% -m PyInstaller --onefile --windowed --clean --name 3MF-To-AD5X --add-data "%~dp0ad5x_template.json;." --collect-data tkinter %EXTRA% bambu2ad5x_gui.py
+%PY% -m PyInstaller --onefile --windowed --clean --name 3MF-To-AD5X --icon "%~dp0assets\appicon.ico" --add-data "%~dp0ad5x_template.json;." --collect-data tkinter %EXTRA% bambu2ad5x_gui.py
 if not exist "dist\3MF-To-AD5X.exe" (
   echo Build failed - see messages above.
   pause

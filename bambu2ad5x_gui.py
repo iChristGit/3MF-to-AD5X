@@ -110,16 +110,28 @@ SHORTCUTS
 
 # ------------------------------------------------------------------------------------------ helpers
 def settings_file():
-    return os.path.join(os.environ.get("APPDATA") or os.path.join(HOME, ".config"), APP, "settings.json")
+    if IS_WIN:
+        return os.path.join(os.environ.get("APPDATA") or os.path.join(HOME, ".config"), APP, "settings.json")
+    if IS_MAC:
+        return os.path.join(HOME, "Library", "Application Support", APP, "settings.json")
+    return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), APP, "settings.json")
+
+
+def _legacy_settings_file():
+    """Pre-macOS-native location (~/.config), so an old install keeps its folder / options / window size."""
+    return os.path.join(HOME, ".config", APP, "settings.json")
 
 
 def load_settings():
-    try:
-        with open(settings_file(), encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except Exception:
-        return {}
+    for path in (settings_file(), _legacy_settings_file()):
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                return d
+        except Exception:
+            pass
+    return {}
 
 
 def save_settings(d):
@@ -183,6 +195,64 @@ def mix(c1, c2, t):
     a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
     b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
     return "#%02x%02x%02x" % tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
+def asset_path(name):
+    """Find a bundled data file: next to the script, inside the PyInstaller bundle, or next to the executable."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for d in (here, getattr(sys, "_MEIPASS", None), os.path.dirname(os.path.abspath(sys.executable)), os.getcwd()):
+        if d:
+            p = os.path.join(d, name)
+            if os.path.isfile(p):
+                return p
+    p = os.path.join(here, "assets", name)
+    return p if os.path.isfile(p) else ""
+
+
+def set_app_icon(win):
+    """Window / Dock icon when running from source (a packaged .app gets its icon from the bundle instead).
+
+    Tk only learned to read PNG in 8.6, and macOS system Python still ships Tk 8.5, so try every
+    route in turn: Pillow (works on any Tk) -> native PNG (8.6+) -> GIF (8.5) -> Windows .ico.
+    """
+    for name in ("appicon.png", os.path.join("assets", "appicon.png")):
+        p = asset_path(name)
+        if not p or not os.path.isfile(p):
+            continue
+        photo = None
+        if HAS_PIL:                                  # best route: works on Tk 8.5 and 8.6 alike
+            try:
+                photo = ImageTk.PhotoImage(Image.open(p), master=win)
+            except Exception:
+                photo = None
+        if photo is None:                            # no Pillow: fall back to what Tk itself can read
+            try:
+                photo = tk.PhotoImage(master=win, file=p)
+            except Exception:
+                photo = None
+        if photo is None:
+            gif = asset_path("appicon.gif")
+            if gif and os.path.isfile(gif):
+                try:
+                    photo = tk.PhotoImage(master=win, file=gif)
+                except Exception:
+                    photo = None
+        if photo is not None:
+            try:
+                win.iconphoto(True, photo)
+                win._app_icon = photo                # keep a reference or Tk garbage-collects it
+                return
+            except Exception:
+                pass
+    if IS_WIN:                                      # Tk has no iconphoto before 8.6 and no .icns support at all
+        for name in ("appicon.ico", os.path.join("assets", "appicon.ico")):
+            p = asset_path(name)
+            if p and os.path.isfile(p):
+                try:
+                    win.iconbitmap(p)
+                    return
+                except Exception:
+                    pass
 
 
 def pil_fit(data, box, upscale=False):
@@ -320,6 +390,7 @@ class App(_Base):
         except Exception:
             self.scale = 1.0
         self.title(f"{APP}  -  Turn any 3MF into AD5X-ready")
+        set_app_icon(self)
         self._set_geometry()
         self.minsize(self.S(940), self.S(640))
         self.q = queue.Queue()
@@ -372,8 +443,63 @@ class App(_Base):
                 pass
         self.set_state("Ready  -  drop .3mf files anywhere in this window" if HAS_DND else "Ready", "muted")
         self.v_search.trace_add("write", lambda *_: self._rebuild())
+        self._build_menu()
         self.after(100, self._poll)
         self.after(250, self.scan)
+
+    def _build_menu(self):
+        """macOS expects a menu bar (and Cmd-Q); Tk on Windows/Linux is fine without one, so only build it there."""
+        if not IS_MAC:
+            return
+        try:
+            bar = tk.Menu(self)
+            appm = tk.Menu(bar, tearoff=0)
+            appm.add_command(label=f"About {APP}", command=self._about)
+            appm.add_separator()
+            appm.add_command(label=f"Hide {APP}", command=lambda: self.withdraw(), accelerator="Command-H")
+            appm.add_command(label="Hide Others", command=self._hide_others, accelerator="Command-Option-H")
+            appm.add_separator()
+            appm.add_command(label=f"Quit {APP}", command=self._close, accelerator="Command-Q")
+            bar.add_cascade(label=APP, menu=appm)
+
+            filem = tk.Menu(bar, tearoff=0)
+            filem.add_command(label="Add Files...", command=self.add_files, accelerator="Command-O")
+            filem.add_command(label="Rescan Folder", command=self.scan, accelerator="Command-R")
+            filem.add_separator()
+            filem.add_command(label="Convert", command=self.convert, accelerator="Command-Return")
+            filem.add_separator()
+            filem.add_command(label="Open Output Folder", command=self._open_out)
+            bar.add_cascade(label="File", menu=filem)
+
+            editm = tk.Menu(bar, tearoff=0)
+            editm.add_command(label="Tick All", command=lambda: self.set_all(True), accelerator="Command-A")
+            editm.add_command(label="Untick All", command=lambda: self.set_all(False))
+            editm.add_command(label="Remove Selected", command=self.remove_sel)
+            editm.add_separator()
+            editm.add_command(label="Find", command=lambda: self.ent_search.focus_set(), accelerator="Command-F")
+            bar.add_cascade(label="Edit", menu=editm)
+
+            viewm = tk.Menu(bar, tearoff=0)
+            viewm.add_command(label="Toggle Log", command=self.toggle_log, accelerator="Command-L")
+            viewm.add_command(label="Advanced Options...", command=self.show_options)
+            viewm.add_separator()
+            viewm.add_command(label="Switch Light / Dark", command=self.toggle_theme)
+            bar.add_cascade(label="View", menu=viewm)
+            self.configure(menu=bar)
+        except Exception:
+            pass
+
+    def _about(self):
+        messagebox.showinfo(APP, f"{APP}\n\nTurn any sliced 3MF into a Flashforge AD5X project for OrcaSlicer.\n"
+                                 "Open the result in OrcaSlicer with File > Open Project.", parent=self)
+
+    def _hide_others(self):
+        # macOS has no global "hide others" in Tk, so just bounce our own window out of the way
+        try:
+            self.withdraw()
+            self.after(600, self.deiconify)
+        except Exception:
+            pass
 
     def S(self, v):
         return int(round(v * self.scale))
@@ -790,13 +916,23 @@ class App(_Base):
                 fn()
                 return "break"
             return h
-        self.bind_all("<Control-a>", guard(lambda: self.set_all(True)))
+        # macOS users expect Cmd where other platforms use Ctrl, so bind both there.
+        mods = ("<Control-", "<Command-") if IS_MAC else ("<Control-",)
+        keys = (("a", guard(lambda: self.set_all(True))),
+                ("f", lambda e: (self.ent_search.focus_set(), "break")[1]),
+                ("l", lambda e: (self.toggle_log(), "break")[1]))
+        for m in mods:
+            for k, fn in keys:
+                self.bind_all(m + k + ">", fn)
         self.bind_all("<Control-o>", lambda e: (self.add_files(), "break")[1])
         self.bind_all("<Control-Return>", lambda e: (self.convert(), "break")[1])
+        if IS_MAC:
+            self.bind_all("<Command-o>", lambda e: (self.add_files(), "break")[1])
+            self.bind_all("<Command-Return>", lambda e: (self.convert(), "break")[1])
         self.bind_all("<F5>", lambda e: (self.scan(), "break")[1])
-        self.bind_all("<Control-f>", lambda e: (self.ent_search.focus_set(), "break")[1])
-        self.bind_all("<Control-l>", lambda e: (self.toggle_log(), "break")[1])
         self.tree.bind("<Delete>", lambda e: self.remove_sel())
+        if IS_MAC:                            # Backspace is what macOS keyboards have; Delete lives on fn+delete
+            self.tree.bind("<BackSpace>", lambda e: self.remove_sel())
 
     def _close(self):
         try:
@@ -1165,9 +1301,10 @@ class App(_Base):
         self.tree.delete(*self.tree.get_children(""))
         self._show_details()
         self._update_count()
+        recursive = self.v_sub.get()      # read the Tk variable here, on the main thread: Tk is not thread-safe
 
         def work():
-            for p in find_3mf(folder, self.v_sub.get()):
+            for p in find_3mf(folder, recursive):
                 if sid != self.scan_id:
                     return
                 self.q.put(("add", sid, self._inspect(p)))
@@ -1188,8 +1325,9 @@ class App(_Base):
             tpl = core.find_default_template()      # stale / missing path -> fall back to the bundled one
             self.v_tpl.set(tpl)
         if not os.path.isfile(tpl):
-            messagebox.showerror(APP, "ad5x_template.json is missing.\nRebuild with build_exe.bat (keep ad5x_template.json in "
-                                 "the same folder), or pick a template under Advanced.")
+            build = "build_exe.bat" if IS_WIN else ("build_mac.sh" if IS_MAC else "PyInstaller")
+            messagebox.showerror(APP, "ad5x_template.json is missing.\nRebuild with " + build +
+                                 " (keep ad5x_template.json in the same folder), or pick a template under Advanced.")
             return
         outs = {p: self.out_path(p) for p in jobs}
         for o in set(outs.values()):
@@ -1299,5 +1437,23 @@ class App(_Base):
         self.txt_log.configure(state="disabled")
 
 
+def _selftest():
+    """Used by build_mac.sh / build_exe.bat: prove the GUI, Tk and the bundled template all come up.
+
+    Prints one SELFTEST line and exits 0. Anything else means the build is broken.
+    """
+    app = App()
+    app.update_idletasks()          # force a real layout pass, so a bad geometry cannot hide
+    tpl = core.find_default_template()
+    icon = "yes" if hasattr(app, "_app_icon") else "no (bundle icon)"
+    ok = os.path.isfile(tpl)
+    print(f"SELFTEST tk={tk.TkVersion} rows={len(app.files)} template={tpl if ok else 'MISSING'} icon={icon}",
+          flush=True)
+    app.destroy()
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(_selftest())
     App().mainloop()
