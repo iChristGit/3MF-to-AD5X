@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Bambu2AD5X v1.0.0 - Turn any 3MF into an AD5X-ready OrcaSlicer project.
+3MF To AD5X - Turn any 3MF into an AD5X-ready OrcaSlicer project.
 
 Bambu Studio / OrcaSlicer / MakerWorld  and  PrusaSlicer / Printables  .3mf  ->  Flashforge AD5X.
 
@@ -29,8 +29,7 @@ try:
 except Exception:
     HAS_PIL = False
 
-APP = "Bambu2AD5X"
-APP_VER = "v1.0.0"
+APP = "3MF To AD5X"
 HOME = os.path.expanduser("~")
 DOWNLOADS = os.path.join(HOME, "Downloads")
 IS_WIN = sys.platform.startswith("win")
@@ -80,7 +79,7 @@ FILTERS = ["All files", "Ready to convert", "Converted", "Can't convert"]
 HELP_TEXT = """\
 TURN ANY 3MF INTO AD5X-READY
 
-Bambu2AD5X takes a sliced project (.3mf) and rebuilds it as a Flashforge AD5X project for OrcaSlicer, keeping the \
+3MF To AD5X takes a sliced project (.3mf) and rebuilds it as a Flashforge AD5X project for OrcaSlicer, keeping the \
 author's print settings (walls, infill, supports, seam, brim, ironing, temperatures, colours) and swapping in \
 AD5X-correct machine values.
 
@@ -94,7 +93,7 @@ WHAT CHANGES
      between are interpolated).
   •  Filaments: preset chosen by material type (PLA > PLA Basic, PETG > PETG Pro ...). The author's
      temperatures and colours are kept.
-  •  Unused filaments are dropped, unless the project has painted colours or colour-change layers.
+  •  Unused filaments are dropped (painted colours are read, so they count). Projects with colour-change layers keep all.
   •  The prime tower moves with the model, and you are warned if it would overlap the model.
   •  Every converted file can come with a .report.txt listing what was kept, renamed, replaced or discarded.
 
@@ -320,7 +319,7 @@ class App(_Base):
             self.scale = max(1.0, self.winfo_fpixels("1i") / 96.0)
         except Exception:
             self.scale = 1.0
-        self.title(f"{APP} {APP_VER}  -  Turn any 3MF into AD5X-ready")
+        self.title(f"{APP}  -  Turn any 3MF into AD5X-ready")
         self._set_geometry()
         self.minsize(self.S(940), self.S(640))
         self.q = queue.Queue()
@@ -599,8 +598,8 @@ class App(_Base):
         self.T(sep, bg="border")
         sep.pack(fill="x", pady=S(10))
         self.check(c, "Drop filaments the model doesn't use", self.v_prune,
-                   "Removes unused filaments and renumbers the rest (like the web converter). Skipped automatically "
-                   "for projects with painted colours or colour-change layers.").pack(anchor="w")
+                   "Removes unused filaments and renumbers the rest (like the web converter). Painted colours are read so "
+                   "they count as used; skipped automatically for projects with colour-change layers.").pack(anchor="w")
         self.check(c, "Write a .report.txt", self.v_report,
                    "Saves a list of everything kept, renamed, replaced or discarded next to each result.").pack(anchor="w", pady=(2, 0))
         self.btn_more = self.pill(c, "More options...", self.show_options, "ghost")
@@ -650,11 +649,6 @@ class App(_Base):
         x = S(28)
         t = h.create_text(x, S(34), text=APP, anchor="w", fill=c["hero_fg"], font=(self.font, 24, "bold"))
         bx = h.bbox(t)
-        vt = h.create_text(bx[2] + S(24), S(35), text=APP_VER, anchor="w", fill=c["hero_fg"], font=(self.font, 9, "bold"))
-        vb = h.bbox(vt)
-        chip = h.create_polygon(self._rr(vb[0] - S(9), vb[1] - S(3), vb[2] + S(9), vb[3] + S(3)), smooth=True,
-                                fill=mix(c["g1"], "#ffffff", .28), outline="")
-        h.tag_lower(chip, vt)
         h.create_text(x, S(70), text="Turn any 3MF into an AD5X-ready OrcaSlicer project.", anchor="w",
                       fill=c["hero_fg"], font=(self.font, 13))
         # steps
@@ -1204,15 +1198,8 @@ class App(_Base):
             except OSError as ex:
                 messagebox.showerror(APP, f"Cannot create output folder:\n{ex}")
                 return
-        if self.v_mode.get() == "replace":
-            if not messagebox.askyesno(APP, f"This will REPLACE {len(jobs)} original .3mf file(s) with the converted "
-                                            "AD5X version.\nThe originals cannot be recovered afterwards.\n\nContinue?",
-                                       icon="warning"):
-                return
-        else:
-            exist = [o for o in outs.values() if os.path.exists(o)]
-            if exist and not messagebox.askyesno(APP, f"{len(exist)} output file(s) already exist and will be overwritten. Continue?"):
-                return
+        # No confirmation pop-ups: replacing / overwriting is what the user picked. Safe anyway - core.convert() builds
+        # the result in a temp file next to the original and swaps it in only when the conversion succeeded.
         self.busy = True
         self.btn_go.set_state("disabled")
         self.btn_openout.pack_forget()

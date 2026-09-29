@@ -23,10 +23,9 @@ How it works (verified against OrcaSlicer's PresetBundle / Preset source):
   * Geometry, painted colours/supports/seams are never touched (bit-for-bit).
 Only the Python standard library is needed.
 """
-import argparse, copy, json, os, re, sys, zipfile
+import argparse, collections, copy, json, math, os, re, sys, zipfile
+import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
-
-VERSION = "1.0.0"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_TEMPLATE = os.path.join(HERE, "ad5x_template.json")
@@ -306,7 +305,7 @@ DISCARDED = set("""accel_to_decel_enable accel_to_decel_factor activate_air_filt
     support_interface_speed support_speed temperature_vitrification template_custom_gcode
     thumbnail_size time_lapse_gcode top_area_threshold top_one_wall_type
     top_surface_acceleration top_surface_jerk top_surface_speed travel_jerk travel_speed
-    upward_compatible_machine use_firmware_retraction use_relative_e_distances version wipe
+    nozzle_volume_type upward_compatible_machine use_firmware_retraction use_relative_e_distances version wipe
     wipe_distance wipe_speed wipe_tower_x wipe_tower_y z_hop z_hop_types""".split())   # machine / motion / Bambu-only
 REPLACED = set("""filament_cost filament_density filament_diameter filament_flow_ratio filament_ids
     filament_is_support filament_long_retractions_when_cut filament_minimal_purge_on_wipe_tower
@@ -387,6 +386,29 @@ def nearest_preset_name(lh):
     return PROCESS_PRESETS[min(PROCESS_PRESETS, key=lambda k: abs(k - lh))]
 
 
+# ---- report grouping, identical to the web converter's audit (Copied / Renamed / Replaced by the profile / Discarded) ----
+REPORT_REPLACED = set("""filament_adhesiveness_category filament_change_length filament_colour_type filament_cost
+    filament_density filament_diameter filament_extruder_variant filament_flow_ratio filament_flush_temp filament_ids
+    filament_is_support filament_long_retractions_when_cut filament_minimal_purge_on_wipe_tower filament_multi_colour
+    filament_notes filament_printable filament_retract_before_wipe filament_retract_restart_extra
+    filament_retract_when_changing_layer filament_retraction_distances_when_cut filament_retraction_length
+    filament_retraction_minimum_travel filament_self_index filament_settings_id filament_shrink filament_soluble
+    filament_vendor filament_wipe filament_wipe_distance filament_z_hop filament_z_hop_types
+    raft_first_layer_expansion tree_support_wall_count""".split())
+REPORT_COPIED_IDS = {"from", "name", "filament_map"}   # counted as copied by the web converter
+
+
+def web_style_groups(rep):
+    """Re-sort the report lists the way the web converter shows them: one Discarded list (machine/motion AND keys
+    that do not exist in Orca), and the same members in 'Replaced by the profile' / 'Copied'."""
+    pool = list(dict.fromkeys(rep["kept"] + rep["replaced"] + rep["discarded"] + rep["no_equivalent"]))
+    kept0 = set(rep["kept"])
+    rep["replaced"] = [k for k in pool if k in REPORT_REPLACED]
+    rep["kept"] = [k for k in pool if (k in kept0 or k in REPORT_COPIED_IDS) and k not in REPORT_REPLACED]
+    rep["discarded"] = [k for k in pool if k not in REPORT_REPLACED and k not in rep["kept"]]
+    rep["no_equivalent"] = []
+
+
 def load_settings(path):
     if path.lower().endswith(".json"):
         with open(path, encoding="utf-8") as f:
@@ -446,10 +468,26 @@ def parse_area(area):
     return max(xs) - min(xs), max(ys) - min(ys)
 
 
-def fmt(x):
-    s = f"{x:.6f}".rstrip("0").rstrip(".")
+def fmt(x, nd=6):
+    s = f"{x:.{nd}f}".rstrip("0").rstrip(".")
     return s if s not in ("", "-0") else "0"
 
+
+# ---- different_settings_to_system -------------------------------------------------------------------------
+WEB_MULTI_COLOUR = "#26A69A"      # what the web converter writes to filament_multi_colour (inert for single-colour filaments)
+
+
+def build_diff_lists(copied, nfil):
+    """[process, filament 1..N, printer].  Orca takes every key that is NOT listed from the installed AD5X system
+    preset, so we list EVERY key we copied from the author: no value can ever be lost, whatever Orca version is
+    installed.  (Extra keys that happen to equal the preset are harmless.)
+    The printer slot stays empty, like the web converter: listing anything there (best_object_pos!) makes Orca flag
+    the printer preset as modified and pop up 'Transfer or discard changes'.  best_object_pos goes into the process
+    slot, exactly where the web converter puts it."""
+    proc = sorted(k for k in copied if k in PRINT_OPTS or k in EXTRA_PROCESS or k == "best_object_pos")
+    proc = [k for k in proc if k != "support_object_skip_flush"]
+    fil = sorted(k for k in copied if k in FILAMENT_OPTS)
+    return [";".join(proc)] + [";".join(fil)] * nfil + [""]
 
 
 # =====================================================================================
@@ -807,9 +845,10 @@ def write_prusa_3mf(src, dst, R, info, dx, dy, appver):
         zout.writestr("Metadata/slice_info.config", slice_info)
 
 
-def bambu_bbox(zin):
+def bambu_bbox(zin, only_ids=None):
     """Real XY bounding box [x0,y0,x1,y1] of everything on the plate, from the 3MF meshes (handles the
-    p:path sub-model files Bambu/Orca use).  Used when Metadata/plate_1.json is absent."""
+    p:path sub-model files Bambu/Orca use).  Used when Metadata/plate_N.json is absent.  `only_ids`
+    restricts it to those build-item object ids (one plate of a multi-plate project)."""
     cache = {}
 
     def load(path):
@@ -857,7 +896,7 @@ def bambu_bbox(zin):
         a = m.group(1)
         oid = re.search(r'objectid="(\d+)"', a)
         tr = re.search(r'transform="([^"]*)"', a)
-        if oid:
+        if oid and (only_ids is None or oid.group(1) in only_ids):
             walk(root, oid.group(1), [_tf(tr.group(1)) if tr else _tf("")], pts)
     if not pts:
         return None
@@ -896,27 +935,229 @@ def _has_paint(zin, name):
             tail = buf[-32:]
 
 
-def used_extruders(zin, S, nfil):
-    """Set of 1-based filament numbers the project really uses, or None when that cannot be told safely
-    (painted colours, colour-change layers, missing object data) - then nothing is removed."""
+_TAG_RE = re.compile(rb"<(object|triangle|component)\b([^>]*)>")
+_PAINT_RE = re.compile(rb'\b(?:paint_color|mmu_segmentation)="([^"]*)"')
+_UNPAINTED = (0,)
+
+
+def paint_states(code):
+    """Filament states used by one triangle's paint_color / mmu_segmentation string (0 = unpainted).
+    The string is a nibble stream stored back to front: every node is a nibble whose low 2 bits are the
+    number of split sides (0 = leaf) and, for a leaf, bits 2-3 the state (3 = 'read one more nibble, +3').
+    Returns None when the string is malformed."""
+    if not code:
+        return _UNPAINTED
+    try:
+        nib = [int(c, 16) for c in reversed(code.decode("ascii"))]
+    except ValueError:
+        return None
+    pos, pending, out = 0, 1, set()
+    while pending > 0:
+        if pos >= len(nib):
+            return None
+        c = nib[pos]
+        pos += 1
+        split = c & 3
+        if split:
+            pending += split            # 1 node -> split+1 children
+        else:
+            pending -= 1
+            st = (c >> 2) & 3
+            if st == 3:
+                if pos >= len(nib):
+                    return None
+                st = nib[pos] + 3
+                pos += 1
+            out.add(st)
+    return tuple(sorted(out))
+
+
+def scan_model(zin, name):
+    """Stream one .model file (they can be 100+ MB) -> {object id: {"n", "cnt", "comps", "bad"}}:
+    triangle count, {filament state: triangles that contain it} and the <component> list."""
+    objs, cur, tail, cache, n0 = {}, None, b"", {}, 0
+
+    def close():
+        if cur is not None:
+            cur["cnt"][0] += n0
+    with zin.open(name) as f:
+        while True:
+            chunk = f.read(1 << 22)
+            buf = tail + chunk
+            tail = b""
+            if chunk:
+                cut = buf.rfind(b"<")
+                if cut > buf.rfind(b">"):          # unfinished tag at the end of the chunk
+                    buf, tail = buf[:cut], buf[cut:]
+            for m in _TAG_RE.finditer(buf):
+                kind, attrs = m.group(1), m.group(2)
+                if kind == b"triangle":
+                    if cur is None:
+                        continue
+                    cur["n"] += 1
+                    if b"paint_color" not in attrs and b"mmu_segmentation" not in attrs:
+                        n0 += 1
+                        continue
+                    pm = _PAINT_RE.search(attrs)
+                    code = pm.group(1) if pm else b""
+                    if code not in cache:
+                        cache[code] = paint_states(code)
+                    st = cache[code]
+                    if st is None:
+                        cur["bad"] = True
+                        n0 += 1
+                    else:
+                        for s in st:
+                            if s == 0:
+                                n0 += 1
+                            else:
+                                cur["cnt"][s] += 1
+                elif kind == b"object":
+                    close()
+                    im = re.search(rb'\bid="(\d+)"', attrs)
+                    cur = {"n": 0, "cnt": collections.Counter(), "comps": [], "bad": False}
+                    n0 = 0
+                    if im:
+                        objs[im.group(1).decode()] = cur
+                    else:
+                        cur = None
+                elif cur is not None:
+                    om = re.search(rb'\bobjectid="(\d+)"', attrs)
+                    pp = re.search(rb'\bp:path="([^"]+)"', attrs)
+                    if om:
+                        cur["comps"].append((om.group(1).decode(), pp.group(1).decode().lstrip("/") if pp else None))
+            if not chunk:
+                break
+    close()
+    return objs
+
+
+def _pos_int(v):
+    return int(v) if v and str(v).isdigit() and int(v) > 0 else None
+
+
+def analyze_filaments(zin, S, nfil):
+    """Which filaments does the project really print with?  Understands painted colours.
+    -> {"used": set of 1-based filaments or None (cannot tell -> remove nothing), "why": reason when None,
+        "fixes": {(object id, part id): filament}, "rebase": {object id: filament}, "notes": [...],
+        "obj_used": {object id: set}}"""
+    res = {"used": None, "why": None, "fixes": {}, "rebase": {}, "notes": [], "obj_used": {}}
     names = zin.namelist()
-    if "Metadata/model_settings.config" not in names:
-        return None
+    MS = "Metadata/model_settings.config"
+    if MS not in names:
+        res["why"] = "missing object data"
+        return res
     if "Metadata/custom_gcode_per_layer.xml" in names and b"<code" in zin.read("Metadata/custom_gcode_per_layer.xml"):
-        return None
-    if any(n.lower().endswith(".model") and _has_paint(zin, n) for n in names):
-        return None
-    ms = zin.read("Metadata/model_settings.config").decode("utf-8", "replace")
-    used = set()
-    blocks = re.findall(r"<object\b.*?</object>", ms, flags=re.S)
-    if not blocks:
-        return None
-    for b in blocks:
-        if 'key="extruder"' not in b:
-            used.add(1)                      # objects without a setting print with filament 1
-    for m in re.finditer(r'<metadata\s+key="extruder"\s+value="(\d+)"', ms):
-        used.add(int(m.group(1)))
-    for m in re.finditer(r'<metadata\s+key="(?:%s)"\s+value="(\d+)"' % "|".join(FIL_OVERRIDES), ms):
+        res["why"] = "colour-change layers"
+        return res
+    raw = zin.read(MS).decode("utf-8", "replace")
+    try:
+        tree = ET.fromstring(raw.encode("utf-8"))
+    except ET.ParseError:
+        res["why"] = "unreadable object data"
+        return res
+    objects = []
+    for o in tree.iter("object"):
+        md = {m.get("key"): m.get("value") for m in o.findall("metadata") if m.get("key")}
+        parts = []
+        for p in o.findall("part"):
+            pm = {m.get("key"): m.get("value") for m in p.findall("metadata") if m.get("key")}
+            parts.append({"id": p.get("id"), "sub": p.get("subtype") or "normal_part",
+                          "ext": _pos_int(pm.get("extruder")), "name": pm.get("name") or md.get("name") or ""})
+        objects.append({"id": o.get("id"), "name": md.get("name") or "", "ext": _pos_int(md.get("extruder")), "parts": parts})
+    if not objects:
+        res["why"] = "missing object data"
+        return res
+
+    # ---- painted-colour data (only the files that really contain some are parsed) ----
+    models = [n for n in names if n.lower().endswith(".model")]
+    painted = {n for n in models if _has_paint(zin, n)}
+    scans = {}
+    if painted:
+        root = "3D/3dmodel.model"
+        for n in {root} | painted:
+            if n in names:
+                scans[n] = scan_model(zin, n)
+        if any(o["bad"] for s in scans.values() for o in s.values()):
+            res["why"] = "unreadable painted-colour data"
+            return res
+
+    class Unresolved(Exception):
+        pass
+
+    def volume_hist(o, p, sole):
+        """{state: triangles} of one volume, None when the volume carries no paint."""
+        if not painted:
+            return None
+        ro = scans.get("3D/3dmodel.model", {}).get(o["id"])
+        if ro is None:
+            raise Unresolved
+        if ro["comps"] and p["id"] is not None:
+            for cid, path in ro["comps"]:
+                if cid == p["id"]:
+                    fname = path or "3D/3dmodel.model"
+                    if fname not in painted:
+                        return None
+                    so = scans.get(fname, {}).get(cid)
+                    if so is None:
+                        raise Unresolved
+                    return so["cnt"]
+            raise Unresolved
+        if ro["n"]:                               # mesh stored directly in the object
+            if "3D/3dmodel.model" not in painted:
+                return None
+            if sole:
+                return ro["cnt"]
+            raise Unresolved
+        raise Unresolved
+
+    used, mapped_states = set(), set()
+    try:
+        for o in objects:
+            parts = o["parts"] or [{"id": None, "sub": "normal_part", "ext": None, "name": o["name"]}]
+            normal = [p for p in parts if p["sub"] == "normal_part"]
+            ou = set()
+            for p in parts:
+                if p["sub"] == "modifier_part":
+                    if p["ext"]:
+                        ou.add(p["ext"])
+                    continue
+                if p["sub"] != "normal_part":
+                    continue                       # blockers / enforcers / negative volumes never print
+                base = p["ext"] or o["ext"] or 1
+                hist = volume_hist(o, p, len(normal) == 1)
+                states = {s for s, c in (hist or {}).items() if s > 0 and c > 0}
+                mapped_states |= states
+                unpainted = hist is None or hist.get(0, 0) > 0 or not states
+                if unpainted:
+                    ou |= states | {base}
+                else:
+                    pick = max(states, key=lambda s: (hist[s], -s))
+                    if pick != base:
+                        res["fixes"][(o["id"], p["id"])] = pick
+                        if len(normal) == 1:
+                            res["rebase"][o["id"]] = pick
+                        res["notes"].append(
+                            f"Object \u201c{p['name'] or o['name']}\u201d is painted entirely with filament {pick} but had "
+                            f"filament {base} as its base, which printed nothing: its base is now {pick}, so the slicer does "
+                            "not swap heads or purge for a colour that is never used.")
+                    ou |= states
+            res["obj_used"][o["id"]] = ou
+            used |= ou
+    except Unresolved:
+        res["fixes"], res["rebase"], res["notes"] = {}, {}, []
+        res["why"] = "could not match the painted colours to the objects"
+        return res
+    every = set()
+    for s in scans.values():
+        for ob in s.values():
+            every |= {k for k, v in ob["cnt"].items() if k > 0 and v > 0}
+    if every - mapped_states:
+        res["fixes"], res["rebase"], res["notes"] = {}, {}, []
+        res["why"] = "painted colours that belong to no printable object"
+        return res
+    ms_txt = raw
+    for m in re.finditer(r'<metadata\s+key="(?:%s)"\s+value="(\d+)"' % "|".join(FIL_OVERRIDES), ms_txt):
         if int(m.group(1)) > 0:
             used.add(int(m.group(1)))
     for k in FIL_OVERRIDES:
@@ -924,7 +1165,21 @@ def used_extruders(zin, S, nfil):
         if n and n > 0:
             used.add(int(n))
     used.discard(0)
-    return used if used and max(used) <= nfil else None
+    if not used or max(used) > nfil:
+        res["why"] = "filament numbers outside the project's filament list"
+        res["fixes"], res["rebase"], res["notes"] = {}, {}, []
+        return res
+    res["used"] = used
+    if len(res["notes"]) > 3:
+        res["notes"] = [f"{len(res['notes'])} objects are painted entirely with another filament than their base one; "
+                        "their base was set to the painted filament so the slicer does not swap heads or purge for a "
+                        "colour that is never used."]
+    return res
+
+
+def used_extruders(zin, S, nfil):
+    """Compatibility wrapper: set of 1-based filaments the project uses, or None when that cannot be told."""
+    return analyze_filaments(zin, S, nfil)["used"]
 
 
 def prune_filaments(R, nfil, keep):
@@ -961,6 +1216,49 @@ def remap_model_settings(xml, keep):
     return xml
 
 
+def rebase_extruders(xml, fixes, rebase):
+    """Give fully-painted parts the filament they are really painted with (old numbering, run before remap)."""
+    def in_obj(m):
+        block, oid = m.group(0), m.group(1)
+        for (o, pid), f in fixes.items():
+            if o != oid or pid is None:
+                continue
+
+            def in_part(pm, f=f):
+                inner = pm.group(2)
+                if re.search(r'<metadata\s+key="extruder"', inner):
+                    inner = re.sub(r'(<metadata\s+key="extruder"\s+value=")\d+(")',
+                                   lambda q: q.group(1) + str(f) + q.group(2), inner, count=1)
+                else:
+                    inner = '\n      <metadata key="extruder" value="%d"/>' % f + inner
+                return pm.group(1) + inner + pm.group(3)
+            block = re.sub(r'(<part\b[^>]*\bid="%s"[^>]*>)(.*?)(</part>)' % re.escape(pid), in_part, block,
+                           count=1, flags=re.S)
+        if oid in rebase:
+            head, sep, tail = block.partition("<part")
+            head = re.sub(r'(<metadata\s+key="extruder"\s+value=")\d+(")',
+                          lambda q: q.group(1) + str(rebase[oid]) + q.group(2), head, count=1)
+            block = head + sep + tail
+        return block
+    return re.sub(r'<object\b[^>]*\bid="(\d+)"[^>]*>.*?</object>', in_obj, xml, flags=re.S)
+
+
+def parse_plates(ms_xml):
+    """{plate id: [build-item object ids]} from Metadata/model_settings.config."""
+    plates = {}
+    for i, block in enumerate(re.findall(r"<plate>(.*?)</plate>", ms_xml, re.S), 1):
+        pid = re.search(r'key="plater_id"\s+value="(\d+)"', block)
+        plates[int(pid.group(1)) if pid else i] = re.findall(r'key="object_id"\s+value="(\d+)"', block)
+    return plates
+
+
+def plate_origin(idx, n, w, h, gap=0.2):
+    """Origin of plate #idx (0-based) of n in the slicer's plate grid: columns = ceil(sqrt(n)), the pitch is the
+    bed size x 1.2, rows go towards -Y.  This is why a bed-size change moves every plate, not just plate 1."""
+    cols = max(1, int(math.ceil(math.sqrt(n) - 1e-9)))
+    return (idx % cols) * w * (1 + gap), -(idx // cols) * h * (1 + gap)
+
+
 def convert(src, dst, template, keep_speeds=False, prune_unused=True):
     """Convert src -> dst.  dst may be the same file as src (overwrite): the result is built in a temp file
     next to it and swapped in only when the conversion succeeded, so a failure never damages the original."""
@@ -986,8 +1284,7 @@ def convert(src, dst, template, keep_speeds=False, prune_unused=True):
 def summary(rep):
     """One-line tally, counted like the web converter (renamed keys count as kept, not-in-Orca as discarded)."""
     k, r, d, ne = len(rep["kept"]), len(rep["renamed"]), len(rep["discarded"]), len(rep["no_equivalent"])
-    return (f"kept {k + r} ({k} copied + {r} renamed), replaced {len(rep['replaced'])}, "
-            f"discarded {d + ne} ({d} machine/motion + {ne} not in Orca)")
+    return f"kept {k + r} ({k} copied + {r} renamed), replaced {len(rep['replaced'])}, discarded {d + ne}"
 
 
 def _convert(src, dst, template, keep_speeds, prune_unused=True):
@@ -1027,7 +1324,7 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
     # 2) project-level multicolour data comes from the author
     cols = fil_vector(S["filament_colour"], nfil, si, fv)
     R["filament_colour"] = cols
-    R["filament_multi_colour"] = list(cols)
+    R["filament_multi_colour"] = [WEB_MULTI_COLOUR] * nfil   # like the web converter (only used by multi-colour filaments)
     rep["kept"] += ["filament_colour", "filament_multi_colour"]
     if "filament_colour_type" in S:
         R["filament_colour_type"] = ["1"] * nfil
@@ -1129,10 +1426,8 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
                 a, b = first(S[key]), first(R[tk])
                 rep["speeds"].append(f"{tk}: {a} -> {b}" + ("  (same)" if str(a) == str(b) else ""))
 
-    # 5) rebuild different_settings_to_system: [process, filament1..N, printer]
-    proc = sorted(k for k in copied_keys if k in PRINT_OPTS or k in EXTRA_PROCESS)
-    fil = sorted(k for k in copied_keys if k in FILAMENT_OPTS)
-    R["different_settings_to_system"] = [";".join(proc)] + [";".join(fil)] * nfil + [";".join(sorted(k for k in copied_keys if k in CARRY_ANYWAY and k != "support_object_skip_flush"))]
+    # 5) rebuild different_settings_to_system: [process, filament1..N, printer]  (see build_diff_lists)
+    R["different_settings_to_system"] = build_diff_lists(copied_keys, nfil)
 
     sd = S.get("different_settings_to_system")
     if isinstance(sd, list):
@@ -1143,8 +1438,9 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
                 if line not in rep["author"]:
                     rep["author"].append(line)
 
-    # 6) build plate.  Like the web converter: centre the model's REAL bounding box on the AD5X plate
-    #    (not just "half the bed-size difference") and move the prime tower by the same offset.
+    # 6) build plate(s).  Like the web converter: centre each plate's REAL bounding box on the AD5X plate and move
+    #    that plate's prime tower by the same offset.  A multi-plate project sits on a plate grid whose pitch depends
+    #    on the bed size (bed x 1.2), so every plate is re-laid on the AD5X grid as well.
     try:
         ow, oh = parse_area(S["printable_area"])
     except Exception:
@@ -1152,62 +1448,104 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
     nw, nh = parse_area(R["printable_area"])
     with zipfile.ZipFile(src) as zin:
         names = zin.namelist()
-        keep_idx = None
-        if prune_unused and not prusa and nfil > 1:
-            used = used_extruders(zin, S, nfil)
-            if used is None:
-                rep["notes"].append(f"could not tell which of the {nfil} filaments the model uses (painted colours, colour-change "
-                                    "layers or missing object data) - all filaments were kept.")
-            elif len(used) < nfil:
-                keep_idx = sorted(used)
-                prune_filaments(R, nfil, keep_idx)
-                rep["notes"].append(f"filaments: the file defined {nfil} and the model uses {len(keep_idx)}; the {nfil - len(keep_idx)} "
-                                    "unused one(s) were removed so they don't show up in the slicer"
-                                    + (" (prime tower switched off - nothing to purge)." if len(keep_idx) == 1 else "."))
+        keep_idx, fixes, rebase, fil_info = None, {}, {}, None
+        if not prusa and nfil > 1:
+            fil_info = analyze_filaments(zin, S, nfil)
+            if prune_unused:
+                used = fil_info["used"]
+                if used is None:
+                    rep["notes"].append(f"could not tell which of the {nfil} filaments the model uses ({fil_info['why']}) - "
+                                        "all filaments were kept.")
+                else:
+                    fixes, rebase = fil_info["fixes"], fil_info["rebase"]
+                    rep["notes"] += fil_info["notes"]
+                    if len(used) < nfil:
+                        keep_idx = sorted(used)
+                        prune_filaments(R, nfil, keep_idx)
+                        rep["notes"].append(f"filaments: the file defined {nfil} and the model uses {len(keep_idx)}; the {nfil - len(keep_idx)} "
+                                            "unused one(s) were removed so they don't show up in the slicer"
+                                            + (" (prime tower switched off - nothing to purge)." if len(keep_idx) == 1 else "."))
         nfil_out = len(keep_idx) if keep_idx else nfil
-        multi = any((m := re.match(r"Metadata/plate_(\d+)\.json$", n)) and int(m.group(1)) > 1 for n in names)
-        fitbox = None
-        if prusa:
-            fitbox = prusa["bbox"]
-        elif "Metadata/plate_1.json" in names:
-            try:
-                fitbox = json.loads(zin.read("Metadata/plate_1.json"))["bbox_all"]
-            except Exception:
-                pass
-        if fitbox is None and not prusa and not multi:
-            try:
-                fitbox = bambu_bbox(zin)
-            except Exception:
-                fitbox = None
-        mbox = None   # the model alone (bbox_all in plate_1.json also contains the prime tower)
-        if not prusa and not multi:
-            try:
-                mbox = bambu_bbox(zin)
-            except Exception:
-                mbox = None
+
+        plates = {}
+        if not prusa and "Metadata/model_settings.config" in names:
+            plates = parse_plates(zin.read("Metadata/model_settings.config").decode("utf-8", "replace"))
+        pids = sorted(plates) or [1]
+        multi = len(pids) > 1
+        obj_plate = {o: p for p, ids in plates.items() for o in ids}
+
+        boxes = {}      # plate id -> (bbox incl. prime tower, model-only bbox), both in plate-local coordinates
+        for i, pid in enumerate(pids):
+            fit = mod = None
+            if prusa:
+                fit = prusa["bbox"]
+            else:
+                pj = f"Metadata/plate_{pid}.json"
+                if pj in names:
+                    try:
+                        j = json.loads(zin.read(pj))
+                        fit = j.get("bbox_all")
+                        bo = [o["bbox"] for o in j.get("bbox_objects", []) if o.get("bbox")]
+                        if bo:
+                            mod = [min(b[0] for b in bo), min(b[1] for b in bo), max(b[2] for b in bo), max(b[3] for b in bo)]
+                    except Exception:
+                        pass
+                if fit is None and ow:
+                    try:
+                        b = bambu_bbox(zin, set(plates[pid]) if multi and plates.get(pid) else None)
+                        if b:
+                            ox, oy = plate_origin(i, len(pids), ow, oh)
+                            fit = mod = [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy]
+                    except Exception:
+                        pass
+            boxes[pid] = (fit, mod)
+
+        shifts = {}
+        for pid in pids:
+            fit = boxes[pid][0]
+            if fit and nw:
+                shifts[pid] = (nw / 2 - (fit[0] + fit[2]) / 2, nh / 2 - (fit[1] + fit[3]) / 2)
+            elif ow:
+                shifts[pid] = ((nw - ow) / 2, (nh - oh) / 2)
+            else:
+                shifts[pid] = (0.0, 0.0)
+        old_org = {pid: plate_origin(i, len(pids), ow, oh) for i, pid in enumerate(pids)} if ow else {}
+        new_org = {pid: plate_origin(i, len(pids), nw, nh) for i, pid in enumerate(pids)}
+        if multi:
+            rep["notes"].append(f"multi-plate project ({len(pids)} plates): each plate was re-centred on the AD5X bed and laid out "
+                                "on the AD5X plate grid, and every plate keeps its own prime tower position.")
+
         sd0 = S.get("different_settings_to_system")
         author_proc = set(str(sd0[0]).split(";")) if isinstance(sd0, list) and sd0 else set()
         mirror = {k: first(R[k]) for k in ("enable_support",) if k in author_proc and k in R}
-        if fitbox and not multi:
-            dx, dy = nw / 2 - (fitbox[0] + fitbox[2]) / 2, nh / 2 - (fitbox[1] + fitbox[3]) / 2
-        elif ow:
-            dx, dy = (nw - ow) / 2, (nh - oh) / 2
-        else:
-            dx = dy = 0.0
-        if multi:
-            rep["notes"].append("multi-plate project: objects shifted by the bed-size difference, not re-centred per plate.")
-        # prime tower: same offset, kept fully inside the plate (the template's 4 mm margin)
+
+        # prime tower: one position per plate, same offset as that plate, kept fully inside the plate
         tw = num(R.get("prime_tower_width")) or 35.0
-        tower = [None, None]
-        for i, (ax, d, lim) in enumerate((("x", dx, nw), ("y", dy, nh))):
+        towers = {pid: [None, None] for pid in pids}
+        for ai, (ax, lim) in enumerate((("x", nw), ("y", nh))):
             k = "wipe_tower_" + ax
-            v = num(first(S.get(k))) if (not prusa and S.get(k) is not None) else None
-            if v is not None:
-                R[k] = [fmt(min(max(v + d, 4.0), lim - tw - 4.0))]
-            tower[i] = num(first(R.get(k)))
+            sv = S.get(k) if not prusa else None
+            if sv is not None:
+                sv = sv if isinstance(sv, list) else [sv]
+                vals = [num(sv[min(i, len(sv) - 1)]) for i in range(len(pids))] if sv else []
+                if vals and None not in vals:
+                    R[k] = [fmt(min(max(v + shifts[pid][ai], 4.0), lim - tw - 4.0), 2) for v, pid in zip(vals, pids)]
+            rv = R.get(k)
+            rv = rv if isinstance(rv, list) else [rv]
+            for i, pid in enumerate(pids):
+                towers[pid][ai] = num(rv[min(i, len(rv) - 1)]) if rv else None
+
+        def guess_plate(x, y):
+            if not old_org:
+                return None
+            cols = max(1, int(math.ceil(math.sqrt(len(pids)) - 1e-9)))
+            col = max(0, int(math.floor(x / (ow * 1.2))))
+            row = int(math.ceil(-y / (oh * 1.2))) if y < 0 else 0
+            idx = row * cols + col
+            return pids[idx] if 0 <= idx < len(pids) else None
+
         if prusa:
-            zout_path = dst
-            write_prusa_3mf(src, dst, R, prusa, dx, dy, str(T.get("version", "2.3.2")))
+            write_prusa_3mf(src, dst, R, prusa, shifts[pids[0]][0], shifts[pids[0]][1], str(T.get("version", "2.3.2")))
         else:
             with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
                 for info in zin.infolist():
@@ -1218,10 +1556,12 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
                     data = zin.read(n)
                     if n == SETTINGS:
                         data = json.dumps(R, indent=4, ensure_ascii=False).encode("utf-8")
-                    elif n == "Metadata/model_settings.config" and (mirror or keep_idx):
+                    elif n == "Metadata/model_settings.config":
                         txt = data.decode("utf-8")
-                        if keep_idx:
-                            txt = remap_model_settings(txt, keep_idx)
+                        if fixes:
+                            txt = rebase_extruders(txt, fixes, rebase)
+                        # always renumber / reset the per-filament maps: the AD5X has one standard nozzle
+                        txt = remap_model_settings(txt, keep_idx or list(range(1, nfil + 1)))
                         if mirror:
                             txt = mirror_object_keys(txt, mirror)
                         data = txt.encode("utf-8")
@@ -1229,40 +1569,65 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
                         txt = data.decode("utf-8")
                         txt = re.sub(r'(<metadata name="Application">)[^<]*',
                                      r"\g<1>BambuStudio-" + str(T.get("version", "2.3.2")), txt, 1)
-                        if ow and (dx or dy):
+                        if ow:
                             def move(m):
-                                t = m.group(2).split()
+                                tag = m.group(0)
+                                tm = re.search(r'transform="([^"]+)"', tag)
+                                if not tm:
+                                    return tag
+                                t = tm.group(1).split()
                                 if len(t) != 12:
-                                    return m.group(0)
+                                    return tag
+                                om = re.search(r'objectid="(\d+)"', tag)
                                 x, y = float(t[9]), float(t[10])
-                                if 0 <= x <= ow and 0 <= y <= oh:
-                                    t[9], t[10] = fmt(x + dx), fmt(y + dy)
-                                else:
-                                    rep["warn"].append("object outside plate 1 (multi-plate project): "
-                                                       "position not adjusted, check the other plates.")
-                                return m.group(1) + " ".join(t) + m.group(3)
-                            txt = re.sub(r'(<item\b[^>]*\btransform=")([^"]+)(")', move, txt)
+                                pid = obj_plate.get(om.group(1)) if om else None
+                                if pid is None:
+                                    pid = guess_plate(x, y)
+                                if pid is None:
+                                    rep["warn"].append("an object could not be assigned to a plate: position not adjusted, check it in Orca.")
+                                    return tag
+                                (dx, dy), (ox, oy), (nx, ny) = shifts[pid], old_org[pid], new_org[pid]
+                                t[9], t[10] = fmt(x - ox + nx + dx, 5), fmt(y - oy + ny + dy, 5)
+                                return tag.replace(tm.group(0), 'transform="' + " ".join(t) + '"')
+                            txt = re.sub(r"<item\b[^>]*>", move, txt)
                         data = txt.encode("utf-8")
                     zout.writestr(info, data)
-    if fitbox and nw:
-        x0, y0, x1, y1 = fitbox[0] + dx, fitbox[1] + dy, fitbox[2] + dx, fitbox[3] + dy
-        mw = (mbox[2] - mbox[0]) if mbox else None
-        mh = (mbox[3] - mbox[1]) if mbox else None
-        if mbox and (mw > nw or mh > nh):
+
+    # fit / prime-tower checks, plate by plate
+    for pid in pids:
+        fit, mod = boxes[pid]
+        if not (fit and nw):
+            continue
+        dx, dy = shifts[pid]
+        x0, y0, x1, y1 = fit[0] + dx, fit[1] + dy, fit[2] + dx, fit[3] + dy
+        lab = f"plate {pid}: " if multi else ""
+        mw = (mod[2] - mod[0]) if mod else None
+        mh = (mod[3] - mod[1]) if mod else None
+        if mod and (mw > nw or mh > nh):
             pct = int(min(nw / mw, nh / mh) * 100 * 0.95)   # 5% margin for brim / prime tower
-            rep["warn"].append(f"the model itself is {mw:.0f} x {mh:.0f} mm - larger than the {nw:.0f} x {nh:.0f} mm "
+            rep["warn"].append(f"{lab}the model itself is {mw:.0f} x {mh:.0f} mm - larger than the {nw:.0f} x {nh:.0f} mm "
                                f"AD5X plate, and no rotation helps. In Orca scale it to about {pct}% or less "
                                "(or split it) before slicing.")
         elif x0 < 0 or y0 < 0 or x1 > nw or y1 > nh:
-            what = "model + prime tower" if mbox else "model"
-            rep["warn"].append(f"{what} ({x1 - x0:.0f} x {y1 - y0:.0f} mm) do not fit the "
+            what = "model + prime tower" if mod else "model"
+            rep["warn"].append(f"{lab}{what} ({x1 - x0:.0f} x {y1 - y0:.0f} mm) do not fit the "
                                f"{nw:.0f} x {nh:.0f} mm AD5X plate"
                                + (f" (the model alone is {mw:.0f} x {mh:.0f} mm - move the prime tower / model in Orca)."
-                                  if mbox else "."))
-        elif nfil_out > 1 and R.get("enable_prime_tower") == "1" and None not in tower and \
-                tower[0] < x1 and tower[0] + tw > x0 and tower[1] < y1 and tower[1] + tw > y0:
-            rep["warn"].append("the prime tower overlaps the model on the AD5X plate - move it in Orca "
-                               "(Prime tower position) before slicing.")
+                                  if mod else "."))
+        else:
+            plate_fil = nfil_out
+            if fil_info and fil_info["used"] is not None:
+                pu = set()
+                for o in plates.get(pid, []):
+                    pu |= fil_info["obj_used"].get(o, set())
+                if pu:
+                    plate_fil = len(pu)
+            tx, ty = towers[pid]
+            if plate_fil > 1 and R.get("enable_prime_tower") == "1" and tx is not None and ty is not None and \
+                    tx < x1 and tx + tw > x0 and ty < y1 and ty + tw > y0:
+                rep["warn"].append(f"{lab}the prime tower overlaps the model on the AD5X plate - move it in Orca "
+                                   "(Prime tower position) before slicing.")
+    web_style_groups(rep)
     return rep, R
 
 
@@ -1273,8 +1638,7 @@ def write_report(path, src, dst, rep):
                          ("speeds", "SPEEDS (Bambu values replaced with AD5X values)"),
                          ("author", "AUTHOR'S OWN CUSTOMISATIONS (differ from their base preset)"), ("kept", "KEPT (author value copied)"),
                          ("renamed", "RENAMED"), ("replaced", "REPLACED by AD5X preset"),
-                         ("discarded", "DISCARDED (machine / motion / Bambu-only)"),
-                         ("no_equivalent", "NOT IN ORCA (dropped)")):
+                         ("discarded", "DISCARDED (machine / motion / Bambu-only / not in Orca)")):
             f.write(f"== {title} ({len(rep[k])})\n" + "".join(f"  {x}\n" for x in sorted(set(rep[k]))) + "\n")
 
 
@@ -1285,7 +1649,6 @@ def main():
     ap.add_argument("--template", default=find_default_template(),
                     help="AD5X project (.3mf saved from YOUR Orca, or .json) used as baseline. "
                          "Default: ad5x_template.json next to this script")
-    ap.add_argument("--version", action="version", version=f"bambu2ad5x {VERSION}")
     ap.add_argument("--report", action="store_true",
                     help="also write a <output>.report.txt listing what was kept / replaced / dropped")
     ap.add_argument("--overwrite", action="store_true",
