@@ -288,7 +288,7 @@ This is a community project and it needs more eyes and more test files. Contribu
 |---|---|
 | 🧪 | **Test more files** from different sources and check the result in OrcaSlicer 2.4.2 |
 | 🔍 | **Verify values** against the author's original *and* real AD5X behaviour (speeds, temps, G-code, flush volumes, prime tower) |
-| 🐧 | **Linux / macOS**: testing, fixes, `build_exe.sh`, AppImage, macOS build |
+| 🐧 | **Linux / macOS**: testing, fixes, `build.sh`, AppImage, macOS build |
 | 🖨️ | **Other Flashforge printers**: templates and test results |
 | 🌍 | **Docs & translations** |
 
