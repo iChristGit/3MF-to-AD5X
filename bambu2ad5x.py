@@ -352,6 +352,11 @@ FILAMENT_PRESETS = {  # filament_type -> AD5X 0.4 system preset shipped with Orc
     "PETG": "Flashforge PETG Pro @FF AD5X", "PETG-CF": "Flashforge PETG-CF @FF AD5X",
     "ABS": "Flashforge ABS Basic @FF AD5X", "ASA": "Flashforge ASA Basic @FF AD5X",
     "TPU": "Flashforge TPU 95A @FF AD5X"}
+# Orca resets the process preset to the printer\'s default (0.20mm Standard) when you (re)select the printer, and only
+# keeps values that differ from the preset it was on.  A project labelled 0.16mm hides "first layer 0.2" (equal to that
+# preset), so it is lost on the switch.  Labelling every project with the DEFAULT preset makes layer height / first layer
+# height count as customisations, so they survive.  Set to None to label by nearest layer height instead.
+PIN_BASE_PRESET = 0.20
 PROCESS_PRESETS = {0.16: "0.16mm Standard @FF AD5X", 0.20: "0.20mm Standard @FF AD5X",
                    0.24: "0.24mm Draft @FF AD5X"}
 
@@ -1342,6 +1347,8 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
     # 3) preset names Orca resolves against its installed AD5X system presets
     lh = num(first(S.get("layer_height", "0.2"))) or 0.2
     R["print_settings_id"] = PROCESS_PRESETS.get(round(lh, 2)) or nearest_preset_name(lh)
+    if PIN_BASE_PRESET:
+        R["print_settings_id"] = PROCESS_PRESETS[PIN_BASE_PRESET]
     if round(lh, 2) not in PROCESS_PRESETS:
         rep["notes"].append(f"no AD5X preset for {lh} mm layers - labelled '{R['print_settings_id']}' (nearest); "
                             "your layer height itself is kept.")
@@ -1414,6 +1421,11 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
                     rep["warn"].append(f"{tk}: {x} is invalid in Orca (range {lo}..{hi}) -> {new}")
                 return new
             val = [sane(x) for x in val] if isinstance(val, list) else sane(val)
+        if tk == "support_style" and val == "tree_organic":
+            # Bambu writes tree_organic; Orca expresses organic trees as tree(auto) + style 'default' and asks to
+            # replace the legacy value on open (the web converter also ends up with 'default').
+            val = "default"
+            rep["notes"].append("support_style: Bambu 'tree_organic' -> Orca 'default' (organic tree supports)")
         R[tk] = val
         copied_keys.add(tk)
         (rep["renamed"] if tk != key else rep["kept"]).append(key if tk == key else f"{key} -> {tk}")
@@ -1427,6 +1439,8 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
                 rep["speeds"].append(f"{tk}: {a} -> {b}" + ("  (same)" if str(a) == str(b) else ""))
 
     # 5) rebuild different_settings_to_system: [process, filament1..N, printer]  (see build_diff_lists)
+    if PIN_BASE_PRESET and not keep_speeds:
+        copied_keys |= {k for k in ("sparse_infill_speed", "internal_solid_infill_speed", "gap_infill_speed") if k in R}
     R["different_settings_to_system"] = build_diff_lists(copied_keys, nfil)
 
     sd = S.get("different_settings_to_system")

@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Building Bambu2AD5X v1.0.0 exe
+title Building 3MF-To-AD5X exe
 
 set PY=python
 where py >nul 2>nul
@@ -38,18 +38,18 @@ set EXTRA=
 echo Extras for this build: %EXTRA%
 
 echo Building exe (takes about a minute)...
-%PY% -m PyInstaller --onefile --windowed --clean --name Bambu2AD5X --add-data "%~dp0ad5x_template.json;." --collect-data tkinter %EXTRA% bambu2ad5x_gui.py
-if not exist "dist\Bambu2AD5X.exe" (
+%PY% -m PyInstaller --onefile --windowed --clean --name 3MF-To-AD5X --add-data "%~dp0ad5x_template.json;." --collect-data tkinter %EXTRA% bambu2ad5x_gui.py
+if not exist "dist\3MF-To-AD5X.exe" (
   echo Build failed - see messages above.
   pause
   exit /b 1
 )
 
-copy /y "dist\Bambu2AD5X.exe" "Bambu2AD5X.exe" >nul
+copy /y "dist\3MF-To-AD5X.exe" "3MF-To-AD5X.exe" >nul
 rmdir /s /q build dist >nul 2>nul
-del /q Bambu2AD5X.spec >nul 2>nul
+del /q 3MF-To-AD5X.spec >nul 2>nul
 
 echo.
-echo Done!  Bambu2AD5X.exe is in this folder - double-click it.
+echo Done!  3MF-To-AD5X.exe is in this folder - double-click it.
 echo You can copy just that one file anywhere; it has everything built in.
 pause
