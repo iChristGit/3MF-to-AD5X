@@ -282,6 +282,40 @@ def tk_fit(data, box):
         return None
 
 
+def checkbox_photo(root, c, on, size):
+    """Draw a large checkbox as a PhotoImage.
+
+    Only the "#0" (tree) column of a ttk.Treeview can show an image, and ttk applies fonts
+    per row rather than per column -- so an oversized checkbox has to be a picture.
+    A blank PhotoImage starts out fully transparent and `put` only paints what it touches,
+    which keeps the box transparent over normal, hovered and selected rows alike. Works
+    on Tk 8.5 and later, so it needs no Pillow.
+    """
+    d = max(12, int(size))
+    img = tk.PhotoImage(master=root, width=d, height=d)
+    pad = max(1, d // 9)
+    t = max(1, d // 11)
+    if on:
+        body, edge, mark = c["accent"], c["accent"], c["accent_fg"]
+    else:
+        body, edge, mark = c["field"], c["muted"], None
+    img.put(body, to=(pad, pad, d - pad, d - pad))
+    for x1, y1, x2, y2 in ((pad, pad, d - pad, pad + t), (pad, d - pad - t, d - pad, d - pad),
+                          (pad, pad, pad + t, d - pad), (d - pad - t, pad, d - pad, d - pad)):
+        img.put(edge, to=(x1, y1, x2, y2))
+    if on:
+        w = max(1, d // 9)
+        def seg(x1, y1, x2, y2):
+            n = int(max(abs(x2 - x1), abs(y2 - y1))) or 1
+            for i in range(n + 1):
+                x = int(x1 + (x2 - x1) * i / n)
+                y = int(y1 + (y2 - y1) * i / n)
+                img.put(mark, to=(x, y, min(d, x + w), min(d, y + w)))
+        seg(0.27 * d, 0.52 * d, 0.43 * d, 0.68 * d)
+        seg(0.43 * d, 0.68 * d, 0.73 * d, 0.33 * d)
+    return img
+
+
 class Tip:
     """Tiny hover tooltip."""
 
@@ -394,7 +428,7 @@ class App(_Base):
         self._set_geometry()
         self.minsize(self.S(940), self.S(640))
         self.q = queue.Queue()
-        self.files = {}              # path -> {"info","checked","status","msg","seq","small"}
+        self.files = {}              # path -> {"info","checked","status","msg","seq"}
         self.seq = 0
         self.scan_id = 0
         self.busy = False
@@ -404,7 +438,7 @@ class App(_Base):
         self.pv_job = None
         self.last_out = []
         self.sort_col, self.sort_rev = None, False
-        self.blank = tk.PhotoImage(width=self.S(40), height=self.S(40))
+        self._cb_img = {}            # checked-state -> checkbox photo, rebuilt by apply_theme
 
         dark = self.cfg["dark"] if "dark" in self.cfg else system_is_dark()
         self.v_dark = tk.BooleanVar(value=bool(dark))
@@ -633,15 +667,15 @@ class App(_Base):
         # tree
         tf = self.frame(c)
         tf.pack(fill="both", expand=True)
-        cols = ("chk", "name", "src", "printer", "layer", "fil", "status")
+        cols = ("name", "src", "printer", "layer", "fil", "status")
         self.tree = ttk.Treeview(tf, columns=cols, show="tree headings", selectmode="extended")
-        spec = (("#0", "", 52, False), ("chk", "", 34, False), ("name", "File", 150, True), ("src", "From", 90, False),
+        spec = (("#0", "", 40, False), ("name", "File", 150, True), ("src", "From", 90, False),
                 ("printer", "Original printer", 120, False), ("layer", "Layer", 62, False),
                 ("fil", "Col.", 42, False), ("status", "Status", 128, False))
         for k, t, w, s in spec:
-            self.tree.heading(k, text=t, command=(self.toggle_all if k == "chk" else (lambda cc=k: self.sort_by(cc))) if k != "#0" else "")
+            self.tree.heading(k, text=t, command=(self.toggle_all if k == "#0" else (lambda cc=k: self.sort_by(cc))))
             self.tree.column(k, width=S(w), minwidth=S(30), stretch=s,
-                             anchor="center" if k in ("chk", "fil", "layer") else "w")
+                             anchor="center" if k in ("#0", "fil", "layer") else "w")
         sb = ttk.Scrollbar(tf, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -860,6 +894,12 @@ class App(_Base):
         for tag, col in (("ok", "ok"), ("warn", "warn"), ("fail", "fail"), ("dim", "muted"), ("ready", "accent")):
             self.tree.tag_configure(tag, foreground=c[col])
         self.lb_state.configure(fg=self._tone_col)
+        self._cb_img = {on: checkbox_photo(self, c, on, self.S(22)) for on in (False, True)}
+        self._by_name = {str(v): v for v in self._cb_img.values()}   # lets a row be matched back to its checkbox
+        for p in self.tree.get_children(""):
+            f = self.files.get(p)
+            if f:
+                self.tree.item(p, image=self._cb_img[f["checked"]])
         for p in self.pills:
             p.redraw()
         self._draw_hero()
@@ -975,7 +1015,7 @@ class App(_Base):
     def _values(self, p):
         f = self.files[p]
         i = f["info"]
-        return ("\u2611" if f["checked"] else "\u2610", os.path.basename(p), KIND_LABEL.get(i["kind"], "?"),
+        return (os.path.basename(p), KIND_LABEL.get(i["kind"], "?"),
                 i["printer"] or "-", (i["layer"] + " mm") if i["layer"] else "-", i["filaments"] or "-", f["status"])
 
     def _visible(self, p):
@@ -997,7 +1037,7 @@ class App(_Base):
     def _insert(self, p):
         f = self.files[p]
         tag = self._tag(f)
-        self.tree.insert("", "end", iid=p, image=f["small"] or self.blank, values=self._values(p), tags=(tag,) if tag else ())
+        self.tree.insert("", "end", iid=p, image=self._cb_img[f["checked"]], values=self._values(p), tags=(tag,) if tag else ())
 
     def _rebuild(self):
         keep = set(self.tree.selection())
@@ -1006,8 +1046,7 @@ class App(_Base):
         keyf = {"name": lambda p: os.path.basename(p).lower(), "src": lambda p: KIND_LABEL.get(self.files[p]["info"]["kind"]),
                 "printer": lambda p: (self.files[p]["info"]["printer"] or "").lower(),
                 "layer": lambda p: float(self.files[p]["info"]["layer"] or 0) if str(self.files[p]["info"]["layer"] or "0").replace(".", "", 1).isdigit() else 0,
-                "fil": lambda p: int(self.files[p]["info"]["filaments"] or 0), "status": lambda p: self.files[p]["status"],
-                "chk": lambda p: not self.files[p]["checked"]}.get(self.sort_col)
+                "fil": lambda p: int(self.files[p]["info"]["filaments"] or 0), "status": lambda p: self.files[p]["status"]}.get(self.sort_col)
         paths.sort(key=keyf if keyf else (lambda p: self.files[p]["seq"]), reverse=self.sort_rev if keyf else False)
         for p in paths:
             self._insert(p)
@@ -1035,8 +1074,9 @@ class App(_Base):
 
     def _refresh(self, p):
         if self.tree.exists(p):
-            tag = self._tag(self.files[p])
-            self.tree.item(p, values=self._values(p), tags=(tag,) if tag else ())
+            f = self.files[p]
+            tag = self._tag(f)
+            self.tree.item(p, image=self._cb_img[f["checked"]], values=self._values(p), tags=(tag,) if tag else ())
         self._update_count()
 
     def _add(self, p, info):
@@ -1045,17 +1085,8 @@ class App(_Base):
         status = STATUS[info["kind"]]
         if info["kind"] in CONVERTIBLE and os.path.exists(self.out_path(p)) and self.v_mode.get() != "replace":
             status = "Already converted"
-        small = None
-        if info.get("thumb"):
-            try:
-                if info.get("_pil") is not None:
-                    small = ImageTk.PhotoImage(info["_pil"])
-                else:
-                    small = tk_fit(info["thumb"], self.S(40))
-            except Exception:
-                small = None
         self.seq += 1
-        self.files[p] = {"info": info, "checked": False, "status": status, "msg": "", "seq": self.seq, "small": small}
+        self.files[p] = {"info": info, "checked": False, "status": status, "msg": "", "seq": self.seq}
         if self._visible(p):
             self._insert(p)
             self.empty.place_forget()
@@ -1115,7 +1146,7 @@ class App(_Base):
             self._refresh(p)
 
     def _on_click(self, e):
-        if self.tree.identify_region(e.x, e.y) == "cell" and self.tree.identify_column(e.x) == "#1":
+        if self.tree.identify_region(e.x, e.y) in ("tree", "cell") and self.tree.identify_column(e.x) == "#0":
             self._toggle(self.tree.identify_row(e.y))
             return "break"
 
@@ -1125,7 +1156,7 @@ class App(_Base):
         return "break"
 
     def _on_double(self, e):
-        if self.tree.identify_region(e.x, e.y) in ("cell", "tree") and self.tree.identify_column(e.x) != "#1":
+        if self.tree.identify_region(e.x, e.y) in ("cell", "tree") and self.tree.identify_column(e.x) != "#0":
             p = self.tree.identify_row(e.y)
             if p:
                 o = self.out_path(p)
