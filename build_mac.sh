@@ -73,6 +73,29 @@ fi
 TK_SO="$("$PY_BIN" -c 'import _tkinter, os; print(getattr(_tkinter, "__file__", "") or "")')"
 TK_VER="$("$PY_BIN" -c 'import tkinter; print(tkinter.TkVersion)')"
 
+# Tk 8.5 is Apple's deprecated, Apple-internal Tcl/Tk (shipped with /usr/bin/python3).
+# It opens a window that never draws (blank/grey) on modern macOS, so reject it loudly
+# instead of proudly building an app whose UI is invisible.
+if printf '%s\n' "$TK_VER" | awk -F. '$1 < 8 || ($1 == 8 && $2 < 6) {exit 1}'; then
+    : # Tk 8.6 / 9.x - good
+else
+    cat >&2 <<EOF
+
+$(printf '\033[31m')error:$(printf '\033[0m') this Python uses Tcl/Tk $TK_VER (Apple's deprecated Tk 8.5). Its windows render
+blank on macOS, so the built app would open with an invisible UI.
+
+  python : $PY_BIN
+
+  Fix:  use a python.org installation instead - it bundles stock Tcl/Tk 8.6+:
+            $(command -v python3)  (Apple, Tk $TK_VER -> replace with python.org)
+        install from https://www.python.org/downloads/macos/  (any build, even the
+        universal2 installer), then run:
+            PYTHON=/Library/Frameworks/Python.framework/V*/bin/python3 build_mac.sh
+
+EOF
+    exit 1
+fi
+
 # Apple refuses universal2 unless BOTH the interpreter and the Tk it links are fat.
 if [ "$TARGET" = "universal2" ]; then
     note "python : $(archs_of "$PY_BIN" || echo '?')"
