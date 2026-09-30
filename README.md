@@ -185,21 +185,31 @@ The build takes a minute or two. It generates the icon, builds the app, ad-hoc s
   <img src="docs/macos.png" alt="3MF To AD5X on macOS" width="640">
 </p>
 
+### Choosing the right Python
+
+The GUI needs a Tk-capable Python with **Tcl/Tk 8.6 or newer**. The build script picks up whatever `python3` is on your `PATH` and refuses to keep going if it can't be used — an app built against a bad Python opens as a **blank window** on modern macOS. The common cases:
+
+| Python you have | How to build |
+|---|---|
+| [python.org](https://www.python.org/downloads/macos/) **universal2 installer** (recommended) | `./build_mac.sh` — builds a **universal2** app that runs on both Apple Silicon and Intel |
+| [python.org](https://www.python.org/downloads/macos/) **arm64/Intel-only installer** | `PYTHON=/Library/Frameworks/Python.framework/V*/bin/python3 ./build_mac.sh` |
+| Homebrew `python3` **after** `brew install python-tk@3.11` (or `@3.14`) | `PYTHON=/opt/homebrew/bin/python3.11 ./build_mac.sh --native` |
+| Apple `/usr/bin/python3` | **No** — its Apple-internal Tcl/Tk is 8.5 (deprecated), windows render blank. The script rejects it and explains. |
+
+Homebrew caveats: `python-tk@3.11` gives Tk 8.6, `python-tk@3.14` gives Tk 9.0 — both fine. But Homebrew Python is **single-architecture** only, so it `--native` builds; it can't produce the universal2 app that runs on both kinds of Mac.
+
 <details>
 <summary><b>Building for both Apple Silicon and Intel (universal2)</b></summary>
 
 <br>
 
-`./build_mac.sh` on its own builds a **universal2** app that runs natively on both, which needs a **universal2 Python** — download the *"macOS 64-bit universal2 installer"* from [python.org](https://www.python.org/downloads/macos/). Don't use Homebrew Python or Apple's `/usr/bin/python3`:
-
-| Python | Why it won't work |
-|---|---|
-| Apple `/usr/bin/python3` | Ships an `arm64e` slice, and its Tcl/Tk 8.5 is Apple-internal and deprecated |
-| Homebrew `python` | One architecture only, and no tkinter at all |
-
-Then run the script with it:
+`./build_mac.sh` on its own builds a **universal2** app that runs natively on both, which needs a **universal2 Python** — download the *"macOS 64-bit universal2 installer"* from [python.org](https://www.python.org/downloads/macos/) (it bundles Tcl/Tk 8.6+).
 
 ```bash
+# universal2 Python already on PATH -> just run it:
+./build_mac.sh
+
+# or point the script at the python.org install explicitly:
 PYTHON=/Library/Frameworks/Python.framework/V*/bin/python3 ./build_mac.sh
 ```
 
@@ -215,10 +225,11 @@ If your Python doesn't qualify, the script says so and tells you what it found, 
 <br>
 
 ```bash
-./build_mac.sh --native
+# Homebrew Python with Tk support (one-time: brew install python-tk@3.11):
+PYTHON=/opt/homebrew/bin/python3.11 ./build_mac.sh --native
 ```
 
-Builds for this Mac only. It works with any Python, which makes it a good first try to confirm everything is set up. The result runs on **this** Mac but not on the other kind of Mac, so don't share that one.
+Builds for this Mac only, and works with any Tk-capable Python (Homebrew included), which makes it a good first try to confirm everything is set up. The result runs on **this** Mac but not on the other kind of Mac, so don't share that one.
 
 </details>
 
@@ -348,6 +359,8 @@ Built and tested for the **AD5X** only. Other Flashforge printers should work as
 | Blurry / no thumbnails | `pip install pillow` and rebuild |
 | Build says Python not found | Reinstall Python with *Add to PATH* ticked |
 | Build says Python is not universal2 | Use the [python.org universal2 installer](https://www.python.org/downloads/macos/), or build with `./build_mac.sh --native` for this Mac only |
+| Build refuses Tcl/Tk 8.5 ("blank window") | Homebrew: `brew install python-tk@3.11`, then `PYTHON=/opt/homebrew/bin/python3.11 ./build_mac.sh --native`. Or install a [python.org](https://www.python.org/downloads/macos/) build |
+| macOS app opens to a blank / grey window | It was built with Apple's deprecated Tk 8.5. Rebuild with a Tk 8.6+ Python (see above) |
 | Windows SmartScreen warns about the exe | It's an unsigned PyInstaller build. Build it yourself from source if you prefer |
 | macOS says the app is damaged or can't be opened | Unsigned build — right-click → Open, or see [Gatekeeper](#-build-from-source) |
 
