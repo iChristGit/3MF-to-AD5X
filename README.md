@@ -23,14 +23,14 @@
 
 <br>
 
-[**Download**](#-download) · [**Quick start**](#-quick-start) · [**Sources**](#-supported-sources) · [**Features**](#-features) · [**Command line**](#-command-line) · [**How it works**](#-how-it-works) · [**Contribute**](#-contributing)
+[**Download**](#-download) · [**Quick start**](#-quick-start) · [**Sources**](#-supported-sources) · [**Features**](#-features) · [**Build**](#-build-from-source) · [**Command line**](#-command-line) · [**How it works**](#-how-it-works) · [**Contribute**](#-contributing)
 
 </div>
 
 <br>
 
 > [!IMPORTANT]
-> **Tested on the Flashforge AD5X + Windows 11 only.** Linux, macOS and other Flashforge machines are untested and **contributors are very welcome**. If you find a bug, or a value that doesn't match the author's original settings or what the AD5X really does, please [open an issue](https://github.com/iChristGit/3MF-to-AD5X/issues) or send a PR.
+> **Conversion is tested on the Flashforge AD5X + Windows 11.** A macOS app now builds from source ([see below](#-build-from-source)) and is self-tested on both Apple Silicon and Intel, but the converted *results* have only been checked in OrcaSlicer on Windows. Linux and other Flashforge machines are untested and **contributors are very welcome**. If you find a bug, or a value that doesn't match the author's original settings or what the AD5X really does, please [open an issue](https://github.com/iChristGit/3MF-to-AD5X/issues) or send a PR.
 
 ---
 
@@ -156,7 +156,9 @@ flowchart LR
 
 ## 🛠 Build from source
 
-You need **Windows** (tested on Windows 11) and **Python 3.8+** ([python.org](https://www.python.org/downloads/), tick *"Add python.exe to PATH"*).
+You need **Python 3.8+** and, on macOS, the Xcode Command Line Tools.
+
+### Windows
 
 ```bat
 git clone https://github.com/iChristGit/3MF-to-AD5X.git
@@ -166,7 +168,87 @@ build_exe.bat
 
 `build_exe.bat` installs PyInstaller and the optional extras, builds in about a minute, and leaves **`3MF-To-AD5X.exe`** in the folder. Copy that one file anywhere.
 
-Just want to run it without building? Use `run_gui.bat`.
+### macOS
+
+```bash
+xcode-select --install          # once, for the tools the build script needs
+git clone https://github.com/iChristGit/3MF-to-AD5X.git
+cd 3MF-to-AD5X
+./build_mac.sh
+```
+
+That leaves **`dist/3MF-To-AD5X.app`** — a single folder you can copy anywhere or zip and share. No Python needed on the machine that runs it.
+
+The build takes a minute or two. It generates the icon, builds the app, ad-hoc signs it, then verifies the result and launches it once to be sure it works.
+
+<p align="center">
+  <img src="docs/macos.png" alt="3MF To AD5X on macOS" width="640">
+</p>
+
+### Choosing the right Python
+
+The GUI needs a Tk-capable Python with **Tcl/Tk 8.6 or newer**. The build script picks up whatever `python3` is on your `PATH` and refuses to keep going if it can't be used — an app built against a bad Python opens as a **blank window** on modern macOS. The common cases:
+
+| Python you have | How to build |
+|---|---|
+| [python.org](https://www.python.org/downloads/macos/) **universal2 installer** (recommended) | `./build_mac.sh` — builds a **universal2** app that runs on both Apple Silicon and Intel |
+| [python.org](https://www.python.org/downloads/macos/) **arm64/Intel-only installer** | `PYTHON=/Library/Frameworks/Python.framework/V*/bin/python3 ./build_mac.sh` |
+| Homebrew `python3` **after** `brew install python-tk@3.11` (or `@3.14`) | `PYTHON=/opt/homebrew/bin/python3.11 ./build_mac.sh --native` |
+| Apple `/usr/bin/python3` | **No** — its Apple-internal Tcl/Tk is 8.5 (deprecated), windows render blank. The script rejects it and explains. |
+
+Homebrew caveats: `python-tk@3.11` gives Tk 8.6, `python-tk@3.14` gives Tk 9.0 — both fine. But Homebrew Python is **single-architecture** only, so it `--native` builds; it can't produce the universal2 app that runs on both kinds of Mac.
+
+<details>
+<summary><b>Building for both Apple Silicon and Intel (universal2)</b></summary>
+
+<br>
+
+`./build_mac.sh` on its own builds a **universal2** app that runs natively on both, which needs a **universal2 Python** — download the *"macOS 64-bit universal2 installer"* from [python.org](https://www.python.org/downloads/macos/) (it bundles Tcl/Tk 8.6+).
+
+```bash
+# universal2 Python already on PATH -> just run it:
+./build_mac.sh
+
+# or point the script at the python.org install explicitly:
+PYTHON=/Library/Frameworks/Python.framework/V*/bin/python3 ./build_mac.sh
+```
+
+Already have a universal2 Python on your `PATH`? Then plain `./build_mac.sh` finds it by itself.
+
+If your Python doesn't qualify, the script says so and tells you what it found, rather than quietly producing an app that only runs on one kind of Mac.
+
+</details>
+
+<details>
+<summary><b>Just want a quick local test build?</b></summary>
+
+<br>
+
+```bash
+# Homebrew Python with Tk support (one-time: brew install python-tk@3.11):
+PYTHON=/opt/homebrew/bin/python3.11 ./build_mac.sh --native
+```
+
+Builds for this Mac only, and works with any Tk-capable Python (Homebrew included), which makes it a good first try to confirm everything is set up. The result runs on **this** Mac but not on the other kind of Mac, so don't share that one.
+
+</details>
+
+<details>
+<summary><b>"damaged" or "can't be opened" when someone double-clicks it</b></summary>
+
+<br>
+
+The app is **not signed or notarised**, so macOS Gatekeeper quarantines it. The first person to open it does this once:
+
+- **Right-click the app → Open → Open**, or
+- run this in Terminal:
+  ```bash
+  xattr -dr com.apple.quarantine /path/to/3MF-To-AD5X.app
+  ```
+
+After that it opens normally. This is normal for any self-built macOS app; only a paid Apple Developer ID plus notarisation removes the warning entirely.
+
+</details>
 
 <details>
 <summary><b>Optional extras</b> (auto-detected, the app works without them)</summary>
@@ -178,9 +260,11 @@ Just want to run it without building? Use `run_gui.bat`.
 | `pillow` | Smooth, larger previews and row thumbnails |
 | `tkinterdnd2` | Drag & drop |
 
-```bat
-pip install pillow tkinterdnd2
+```bash
+pip install pillow tkinterdnd2     # or: pip3 install ...
 ```
+
+Both build scripts pick these up automatically when they're already installed.
 
 </details>
 
@@ -274,7 +358,11 @@ Built and tested for the **AD5X** only. Other Flashforge printers should work as
 | No drag & drop | `pip install tkinterdnd2` and rebuild |
 | Blurry / no thumbnails | `pip install pillow` and rebuild |
 | Build says Python not found | Reinstall Python with *Add to PATH* ticked |
+| Build says Python is not universal2 | Use the [python.org universal2 installer](https://www.python.org/downloads/macos/), or build with `./build_mac.sh --native` for this Mac only |
+| Build refuses Tcl/Tk 8.5 ("blank window") | Homebrew: `brew install python-tk@3.11`, then `PYTHON=/opt/homebrew/bin/python3.11 ./build_mac.sh --native`. Or install a [python.org](https://www.python.org/downloads/macos/) build |
+| macOS app opens to a blank / grey window | It was built with Apple's deprecated Tk 8.5. Rebuild with a Tk 8.6+ Python (see above) |
 | Windows SmartScreen warns about the exe | It's an unsigned PyInstaller build. Build it yourself from source if you prefer |
+| macOS says the app is damaged or can't be opened | Unsigned build — right-click → Open, or see [Gatekeeper](#-build-from-source) |
 
 </details>
 
@@ -315,11 +403,19 @@ This is a community project and it needs more eyes and more test files. Contribu
 3MF-to-AD5X/
 ├── docs/
 │   ├── hero.png           # README banner
-│   └── screenshot.png     # app screenshot
+│   ├── screenshot.png     # app screenshot
+│   └── macos.png          # macOS app screenshot
+├── assets/
+│   ├── make_icon.py       # regenerates the app icons from scratch
+│   ├── appicon.png        # 1024×1024 source for the .icns
+│   ├── appicon.icns       # macOS bundle icon
+│   ├── appicon.ico        # Windows exe icon
+│   └── appicon.gif        # runtime icon fallback for old Tk
 ├── bambu2ad5x.py          # conversion engine (stdlib only) + CLI
 ├── bambu2ad5x_gui.py      # Tkinter GUI
 ├── ad5x_template.json     # AD5X 0.4 nozzle machine template
 ├── build_exe.bat          # builds 3MF-To-AD5X.exe with PyInstaller
+├── build_mac.sh           # builds 3MF-To-AD5X.app (universal2, or --native)
 ├── run_gui.bat            # runs the GUI without building
 ├── LICENSE
 └── README.md

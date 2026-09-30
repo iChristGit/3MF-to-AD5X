@@ -110,16 +110,28 @@ SHORTCUTS
 
 # ------------------------------------------------------------------------------------------ helpers
 def settings_file():
-    return os.path.join(os.environ.get("APPDATA") or os.path.join(HOME, ".config"), APP, "settings.json")
+    if IS_WIN:
+        return os.path.join(os.environ.get("APPDATA") or os.path.join(HOME, ".config"), APP, "settings.json")
+    if IS_MAC:
+        return os.path.join(HOME, "Library", "Application Support", APP, "settings.json")
+    return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), APP, "settings.json")
+
+
+def _legacy_settings_file():
+    """Pre-macOS-native location (~/.config), so an old install keeps its folder / options / window size."""
+    return os.path.join(HOME, ".config", APP, "settings.json")
 
 
 def load_settings():
-    try:
-        with open(settings_file(), encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except Exception:
-        return {}
+    for path in (settings_file(), _legacy_settings_file()):
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                return d
+        except Exception:
+            pass
+    return {}
 
 
 def save_settings(d):
@@ -185,6 +197,64 @@ def mix(c1, c2, t):
     return "#%02x%02x%02x" % tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
+def asset_path(name):
+    """Find a bundled data file: next to the script, inside the PyInstaller bundle, or next to the executable."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for d in (here, getattr(sys, "_MEIPASS", None), os.path.dirname(os.path.abspath(sys.executable)), os.getcwd()):
+        if d:
+            p = os.path.join(d, name)
+            if os.path.isfile(p):
+                return p
+    p = os.path.join(here, "assets", name)
+    return p if os.path.isfile(p) else ""
+
+
+def set_app_icon(win):
+    """Window / Dock icon when running from source (a packaged .app gets its icon from the bundle instead).
+
+    Tk only learned to read PNG in 8.6, and macOS system Python still ships Tk 8.5, so try every
+    route in turn: Pillow (works on any Tk) -> native PNG (8.6+) -> GIF (8.5) -> Windows .ico.
+    """
+    for name in ("appicon.png", os.path.join("assets", "appicon.png")):
+        p = asset_path(name)
+        if not p or not os.path.isfile(p):
+            continue
+        photo = None
+        if HAS_PIL:                                  # best route: works on Tk 8.5 and 8.6 alike
+            try:
+                photo = ImageTk.PhotoImage(Image.open(p), master=win)
+            except Exception:
+                photo = None
+        if photo is None:                            # no Pillow: fall back to what Tk itself can read
+            try:
+                photo = tk.PhotoImage(master=win, file=p)
+            except Exception:
+                photo = None
+        if photo is None:
+            gif = asset_path("appicon.gif")
+            if gif and os.path.isfile(gif):
+                try:
+                    photo = tk.PhotoImage(master=win, file=gif)
+                except Exception:
+                    photo = None
+        if photo is not None:
+            try:
+                win.iconphoto(True, photo)
+                win._app_icon = photo                # keep a reference or Tk garbage-collects it
+                return
+            except Exception:
+                pass
+    if IS_WIN:                                      # Tk has no iconphoto before 8.6 and no .icns support at all
+        for name in ("appicon.ico", os.path.join("assets", "appicon.ico")):
+            p = asset_path(name)
+            if p and os.path.isfile(p):
+                try:
+                    win.iconbitmap(p)
+                    return
+                except Exception:
+                    pass
+
+
 def pil_fit(data, box, upscale=False):
     """PNG bytes -> PIL image fitted into box x box (worker-thread safe)."""
     im = Image.open(io.BytesIO(data))
@@ -210,6 +280,40 @@ def tk_fit(data, box):
         return img
     except Exception:
         return None
+
+
+def checkbox_photo(root, c, on, size):
+    """Draw a large checkbox as a PhotoImage.
+
+    Only the "#0" (tree) column of a ttk.Treeview can show an image, and ttk applies fonts
+    per row rather than per column -- so an oversized checkbox has to be a picture.
+    A blank PhotoImage starts out fully transparent and `put` only paints what it touches,
+    which keeps the box transparent over normal, hovered and selected rows alike. Works
+    on Tk 8.5 and later, so it needs no Pillow.
+    """
+    d = max(12, int(size))
+    img = tk.PhotoImage(master=root, width=d, height=d)
+    pad = max(1, d // 9)
+    t = max(1, d // 11)
+    if on:
+        body, edge, mark = c["accent"], c["accent"], c["accent_fg"]
+    else:
+        body, edge, mark = c["field"], c["muted"], None
+    img.put(body, to=(pad, pad, d - pad, d - pad))
+    for x1, y1, x2, y2 in ((pad, pad, d - pad, pad + t), (pad, d - pad - t, d - pad, d - pad),
+                          (pad, pad, pad + t, d - pad), (d - pad - t, pad, d - pad, d - pad)):
+        img.put(edge, to=(x1, y1, x2, y2))
+    if on:
+        w = max(1, d // 9)
+        def seg(x1, y1, x2, y2):
+            n = int(max(abs(x2 - x1), abs(y2 - y1))) or 1
+            for i in range(n + 1):
+                x = int(x1 + (x2 - x1) * i / n)
+                y = int(y1 + (y2 - y1) * i / n)
+                img.put(mark, to=(x, y, min(d, x + w), min(d, y + w)))
+        seg(0.27 * d, 0.52 * d, 0.43 * d, 0.68 * d)
+        seg(0.43 * d, 0.68 * d, 0.73 * d, 0.33 * d)
+    return img
 
 
 class Tip:
@@ -320,10 +424,11 @@ class App(_Base):
         except Exception:
             self.scale = 1.0
         self.title(f"{APP}  -  Turn any 3MF into AD5X-ready")
+        set_app_icon(self)
         self._set_geometry()
         self.minsize(self.S(940), self.S(640))
         self.q = queue.Queue()
-        self.files = {}              # path -> {"info","checked","status","msg","seq","small"}
+        self.files = {}              # path -> {"info","checked","status","msg","seq"}
         self.seq = 0
         self.scan_id = 0
         self.busy = False
@@ -333,7 +438,7 @@ class App(_Base):
         self.pv_job = None
         self.last_out = []
         self.sort_col, self.sort_rev = None, False
-        self.blank = tk.PhotoImage(width=self.S(40), height=self.S(40))
+        self._cb_img = {}            # checked-state -> checkbox photo, rebuilt by apply_theme
 
         dark = self.cfg["dark"] if "dark" in self.cfg else system_is_dark()
         self.v_dark = tk.BooleanVar(value=bool(dark))
@@ -372,8 +477,63 @@ class App(_Base):
                 pass
         self.set_state("Ready  -  drop .3mf files anywhere in this window" if HAS_DND else "Ready", "muted")
         self.v_search.trace_add("write", lambda *_: self._rebuild())
+        self._build_menu()
         self.after(100, self._poll)
         self.after(250, self.scan)
+
+    def _build_menu(self):
+        """macOS expects a menu bar (and Cmd-Q); Tk on Windows/Linux is fine without one, so only build it there."""
+        if not IS_MAC:
+            return
+        try:
+            bar = tk.Menu(self)
+            appm = tk.Menu(bar, tearoff=0)
+            appm.add_command(label=f"About {APP}", command=self._about)
+            appm.add_separator()
+            appm.add_command(label=f"Hide {APP}", command=lambda: self.withdraw(), accelerator="Command-H")
+            appm.add_command(label="Hide Others", command=self._hide_others, accelerator="Command-Option-H")
+            appm.add_separator()
+            appm.add_command(label=f"Quit {APP}", command=self._close, accelerator="Command-Q")
+            bar.add_cascade(label=APP, menu=appm)
+
+            filem = tk.Menu(bar, tearoff=0)
+            filem.add_command(label="Add Files...", command=self.add_files, accelerator="Command-O")
+            filem.add_command(label="Rescan Folder", command=self.scan, accelerator="Command-R")
+            filem.add_separator()
+            filem.add_command(label="Convert", command=self.convert, accelerator="Command-Return")
+            filem.add_separator()
+            filem.add_command(label="Open Output Folder", command=self._open_out)
+            bar.add_cascade(label="File", menu=filem)
+
+            editm = tk.Menu(bar, tearoff=0)
+            editm.add_command(label="Tick All", command=lambda: self.set_all(True), accelerator="Command-A")
+            editm.add_command(label="Untick All", command=lambda: self.set_all(False))
+            editm.add_command(label="Remove Selected", command=self.remove_sel)
+            editm.add_separator()
+            editm.add_command(label="Find", command=lambda: self.ent_search.focus_set(), accelerator="Command-F")
+            bar.add_cascade(label="Edit", menu=editm)
+
+            viewm = tk.Menu(bar, tearoff=0)
+            viewm.add_command(label="Toggle Log", command=self.toggle_log, accelerator="Command-L")
+            viewm.add_command(label="Advanced Options...", command=self.show_options)
+            viewm.add_separator()
+            viewm.add_command(label="Switch Light / Dark", command=self.toggle_theme)
+            bar.add_cascade(label="View", menu=viewm)
+            self.configure(menu=bar)
+        except Exception:
+            pass
+
+    def _about(self):
+        messagebox.showinfo(APP, f"{APP}\n\nTurn any sliced 3MF into a Flashforge AD5X project for OrcaSlicer.\n"
+                                 "Open the result in OrcaSlicer with File > Open Project.", parent=self)
+
+    def _hide_others(self):
+        # macOS has no global "hide others" in Tk, so just bounce our own window out of the way
+        try:
+            self.withdraw()
+            self.after(600, self.deiconify)
+        except Exception:
+            pass
 
     def S(self, v):
         return int(round(v * self.scale))
@@ -507,15 +667,15 @@ class App(_Base):
         # tree
         tf = self.frame(c)
         tf.pack(fill="both", expand=True)
-        cols = ("chk", "name", "src", "printer", "layer", "fil", "status")
+        cols = ("name", "src", "printer", "layer", "fil", "status")
         self.tree = ttk.Treeview(tf, columns=cols, show="tree headings", selectmode="extended")
-        spec = (("#0", "", 52, False), ("chk", "", 34, False), ("name", "File", 150, True), ("src", "From", 90, False),
+        spec = (("#0", "", 40, False), ("name", "File", 150, True), ("src", "From", 90, False),
                 ("printer", "Original printer", 120, False), ("layer", "Layer", 62, False),
                 ("fil", "Col.", 42, False), ("status", "Status", 128, False))
         for k, t, w, s in spec:
-            self.tree.heading(k, text=t, command=(self.toggle_all if k == "chk" else (lambda cc=k: self.sort_by(cc))) if k != "#0" else "")
+            self.tree.heading(k, text=t, command=(self.toggle_all if k == "#0" else (lambda cc=k: self.sort_by(cc))))
             self.tree.column(k, width=S(w), minwidth=S(30), stretch=s,
-                             anchor="center" if k in ("chk", "fil", "layer") else "w")
+                             anchor="center" if k in ("#0", "fil", "layer") else "w")
         sb = ttk.Scrollbar(tf, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -734,6 +894,12 @@ class App(_Base):
         for tag, col in (("ok", "ok"), ("warn", "warn"), ("fail", "fail"), ("dim", "muted"), ("ready", "accent")):
             self.tree.tag_configure(tag, foreground=c[col])
         self.lb_state.configure(fg=self._tone_col)
+        self._cb_img = {on: checkbox_photo(self, c, on, self.S(22)) for on in (False, True)}
+        self._by_name = {str(v): v for v in self._cb_img.values()}   # lets a row be matched back to its checkbox
+        for p in self.tree.get_children(""):
+            f = self.files.get(p)
+            if f:
+                self.tree.item(p, image=self._cb_img[f["checked"]])
         for p in self.pills:
             p.redraw()
         self._draw_hero()
@@ -790,13 +956,23 @@ class App(_Base):
                 fn()
                 return "break"
             return h
-        self.bind_all("<Control-a>", guard(lambda: self.set_all(True)))
+        # macOS users expect Cmd where other platforms use Ctrl, so bind both there.
+        mods = ("<Control-", "<Command-") if IS_MAC else ("<Control-",)
+        keys = (("a", guard(lambda: self.set_all(True))),
+                ("f", lambda e: (self.ent_search.focus_set(), "break")[1]),
+                ("l", lambda e: (self.toggle_log(), "break")[1]))
+        for m in mods:
+            for k, fn in keys:
+                self.bind_all(m + k + ">", fn)
         self.bind_all("<Control-o>", lambda e: (self.add_files(), "break")[1])
         self.bind_all("<Control-Return>", lambda e: (self.convert(), "break")[1])
+        if IS_MAC:
+            self.bind_all("<Command-o>", lambda e: (self.add_files(), "break")[1])
+            self.bind_all("<Command-Return>", lambda e: (self.convert(), "break")[1])
         self.bind_all("<F5>", lambda e: (self.scan(), "break")[1])
-        self.bind_all("<Control-f>", lambda e: (self.ent_search.focus_set(), "break")[1])
-        self.bind_all("<Control-l>", lambda e: (self.toggle_log(), "break")[1])
         self.tree.bind("<Delete>", lambda e: self.remove_sel())
+        if IS_MAC:                            # Backspace is what macOS keyboards have; Delete lives on fn+delete
+            self.tree.bind("<BackSpace>", lambda e: self.remove_sel())
 
     def _close(self):
         try:
@@ -839,7 +1015,7 @@ class App(_Base):
     def _values(self, p):
         f = self.files[p]
         i = f["info"]
-        return ("\u2611" if f["checked"] else "\u2610", os.path.basename(p), KIND_LABEL.get(i["kind"], "?"),
+        return (os.path.basename(p), KIND_LABEL.get(i["kind"], "?"),
                 i["printer"] or "-", (i["layer"] + " mm") if i["layer"] else "-", i["filaments"] or "-", f["status"])
 
     def _visible(self, p):
@@ -861,7 +1037,7 @@ class App(_Base):
     def _insert(self, p):
         f = self.files[p]
         tag = self._tag(f)
-        self.tree.insert("", "end", iid=p, image=f["small"] or self.blank, values=self._values(p), tags=(tag,) if tag else ())
+        self.tree.insert("", "end", iid=p, image=self._cb_img[f["checked"]], values=self._values(p), tags=(tag,) if tag else ())
 
     def _rebuild(self):
         keep = set(self.tree.selection())
@@ -870,8 +1046,7 @@ class App(_Base):
         keyf = {"name": lambda p: os.path.basename(p).lower(), "src": lambda p: KIND_LABEL.get(self.files[p]["info"]["kind"]),
                 "printer": lambda p: (self.files[p]["info"]["printer"] or "").lower(),
                 "layer": lambda p: float(self.files[p]["info"]["layer"] or 0) if str(self.files[p]["info"]["layer"] or "0").replace(".", "", 1).isdigit() else 0,
-                "fil": lambda p: int(self.files[p]["info"]["filaments"] or 0), "status": lambda p: self.files[p]["status"],
-                "chk": lambda p: not self.files[p]["checked"]}.get(self.sort_col)
+                "fil": lambda p: int(self.files[p]["info"]["filaments"] or 0), "status": lambda p: self.files[p]["status"]}.get(self.sort_col)
         paths.sort(key=keyf if keyf else (lambda p: self.files[p]["seq"]), reverse=self.sort_rev if keyf else False)
         for p in paths:
             self._insert(p)
@@ -899,8 +1074,9 @@ class App(_Base):
 
     def _refresh(self, p):
         if self.tree.exists(p):
-            tag = self._tag(self.files[p])
-            self.tree.item(p, values=self._values(p), tags=(tag,) if tag else ())
+            f = self.files[p]
+            tag = self._tag(f)
+            self.tree.item(p, image=self._cb_img[f["checked"]], values=self._values(p), tags=(tag,) if tag else ())
         self._update_count()
 
     def _add(self, p, info):
@@ -909,17 +1085,8 @@ class App(_Base):
         status = STATUS[info["kind"]]
         if info["kind"] in CONVERTIBLE and os.path.exists(self.out_path(p)) and self.v_mode.get() != "replace":
             status = "Already converted"
-        small = None
-        if info.get("thumb"):
-            try:
-                if info.get("_pil") is not None:
-                    small = ImageTk.PhotoImage(info["_pil"])
-                else:
-                    small = tk_fit(info["thumb"], self.S(40))
-            except Exception:
-                small = None
         self.seq += 1
-        self.files[p] = {"info": info, "checked": False, "status": status, "msg": "", "seq": self.seq, "small": small}
+        self.files[p] = {"info": info, "checked": False, "status": status, "msg": "", "seq": self.seq}
         if self._visible(p):
             self._insert(p)
             self.empty.place_forget()
@@ -979,7 +1146,7 @@ class App(_Base):
             self._refresh(p)
 
     def _on_click(self, e):
-        if self.tree.identify_region(e.x, e.y) == "cell" and self.tree.identify_column(e.x) == "#1":
+        if self.tree.identify_region(e.x, e.y) in ("tree", "cell") and self.tree.identify_column(e.x) == "#0":
             self._toggle(self.tree.identify_row(e.y))
             return "break"
 
@@ -989,7 +1156,7 @@ class App(_Base):
         return "break"
 
     def _on_double(self, e):
-        if self.tree.identify_region(e.x, e.y) in ("cell", "tree") and self.tree.identify_column(e.x) != "#1":
+        if self.tree.identify_region(e.x, e.y) in ("cell", "tree") and self.tree.identify_column(e.x) != "#0":
             p = self.tree.identify_row(e.y)
             if p:
                 o = self.out_path(p)
@@ -1165,9 +1332,10 @@ class App(_Base):
         self.tree.delete(*self.tree.get_children(""))
         self._show_details()
         self._update_count()
+        recursive = self.v_sub.get()      # read the Tk variable here, on the main thread: Tk is not thread-safe
 
         def work():
-            for p in find_3mf(folder, self.v_sub.get()):
+            for p in find_3mf(folder, recursive):
                 if sid != self.scan_id:
                     return
                 self.q.put(("add", sid, self._inspect(p)))
@@ -1188,8 +1356,9 @@ class App(_Base):
             tpl = core.find_default_template()      # stale / missing path -> fall back to the bundled one
             self.v_tpl.set(tpl)
         if not os.path.isfile(tpl):
-            messagebox.showerror(APP, "ad5x_template.json is missing.\nRebuild with build_exe.bat (keep ad5x_template.json in "
-                                 "the same folder), or pick a template under Advanced.")
+            build = "build_exe.bat" if IS_WIN else ("build_mac.sh" if IS_MAC else "PyInstaller")
+            messagebox.showerror(APP, "ad5x_template.json is missing.\nRebuild with " + build +
+                                 " (keep ad5x_template.json in the same folder), or pick a template under Advanced.")
             return
         outs = {p: self.out_path(p) for p in jobs}
         for o in set(outs.values()):
@@ -1299,5 +1468,23 @@ class App(_Base):
         self.txt_log.configure(state="disabled")
 
 
+def _selftest():
+    """Used by build_mac.sh / build_exe.bat: prove the GUI, Tk and the bundled template all come up.
+
+    Prints one SELFTEST line and exits 0. Anything else means the build is broken.
+    """
+    app = App()
+    app.update_idletasks()          # force a real layout pass, so a bad geometry cannot hide
+    tpl = core.find_default_template()
+    icon = "yes" if hasattr(app, "_app_icon") else "no (bundle icon)"
+    ok = os.path.isfile(tpl)
+    print(f"SELFTEST tk={tk.TkVersion} rows={len(app.files)} template={tpl if ok else 'MISSING'} icon={icon}",
+          flush=True)
+    app.destroy()
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(_selftest())
     App().mainloop()
