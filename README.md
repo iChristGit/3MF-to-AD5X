@@ -181,6 +181,10 @@ That leaves **`dist/3MF-To-AD5X.app`** — a single folder you can copy anywhere
 
 The build takes a minute or two. It generates the icon, builds the app, ad-hoc signs it, then verifies the result and launches it once to be sure it works.
 
+<p align="center">
+  <img src="docs/macos.png" alt="3MF To AD5X on macOS" width="640">
+</p>
+
 <details>
 <summary><b>Building for both Apple Silicon and Intel (universal2)</b></summary>
 
@@ -386,7 +390,8 @@ This is a community project and it needs more eyes and more test files. Contribu
 3MF-to-AD5X/
 ├── docs/
 │   ├── hero.png           # README banner
-│   └── screenshot.png     # app screenshot
+│   ├── screenshot.png     # app screenshot
+│   └── macos.png          # macOS app screenshot
 ├── assets/
 │   ├── make_icon.py       # regenerates the app icons from scratch
 │   ├── appicon.png        # 1024×1024 source for the .icns
