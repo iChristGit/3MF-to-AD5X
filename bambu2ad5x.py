@@ -387,6 +387,28 @@ def speeds_for_layer(lh):
     return out, f"layer height {lh} mm is between the {lo:.2f} and {hi:.2f} mm presets - infill speeds interpolated."
 
 
+def slower_author_speeds(S, T):
+    """Speeds the designer customised (listed in the process slot of different_settings_to_system) AND set
+    lower than the AD5X template's value -> {orca_key: value}.  Same rule as the web converter: a deliberately
+    slow profile (thin parts, flexible blades, quality) must not be sped up; anything faster is replaced."""
+    sd = S.get("different_settings_to_system")
+    if not isinstance(sd, list) or not sd:
+        return {}
+    out = {}
+    for k in (x for x in str(sd[0]).split(";") if x):
+        tk = RENAMES.get(k, k)
+        if not tk.endswith("_speed") or tk in NOT_SPEED or k not in S:
+            continue
+        a = first(S[k])
+        b = first(T.get(tk)) if tk in T else None
+        if a is None or b is None or str(a).endswith("%") or str(b).endswith("%"):
+            continue
+        na, nb = num(a), num(b)
+        if na is not None and nb is not None and 0 < na < nb:
+            out[tk] = na
+    return out
+
+
 def nearest_preset_name(lh):
     return PROCESS_PRESETS[min(PROCESS_PRESETS, key=lambda k: abs(k - lh))]
 
@@ -400,20 +422,65 @@ REPORT_REPLACED = set("""filament_adhesiveness_category filament_change_length f
     filament_retraction_minimum_travel filament_self_index filament_settings_id filament_shrink filament_soluble
     filament_tower_interface_pre_extrusion_dist filament_tower_interface_pre_extrusion_length
     filament_tower_interface_print_temp filament_tower_interface_purge_volume filament_tower_ironing_area
-    filament_vendor filament_wipe filament_wipe_distance filament_z_hop filament_z_hop_types
-    raft_first_layer_expansion tree_support_wall_count""".split())
+    filament_vendor filament_wipe filament_wipe_distance filament_z_hop filament_z_hop_types""".split())
+REPORT_HIDDEN = set()
 REPORT_COPIED_IDS = {"from", "name", "filament_map"}   # counted as copied by the web converter
 
 
 def web_style_groups(rep):
     """Re-sort the report lists the way the web converter shows them: one Discarded list (machine/motion AND keys
     that do not exist in Orca), and the same members in 'Replaced by the profile' / 'Copied'."""
-    pool = list(dict.fromkeys(rep["kept"] + rep["replaced"] + rep["discarded"] + rep["no_equivalent"]))
-    kept0 = set(rep["kept"])
-    rep["replaced"] = [k for k in pool if k in REPORT_REPLACED]
-    rep["kept"] = [k for k in pool if (k in kept0 or k in REPORT_COPIED_IDS) and k not in REPORT_REPLACED]
-    rep["discarded"] = [k for k in pool if k not in REPORT_REPLACED and k not in rep["kept"]]
+    pool = [k for k in dict.fromkeys(rep["kept"] + rep["replaced"] + rep["discarded"] + rep["no_equivalent"])
+            if k not in REPORT_HIDDEN]
+    # the web counts these two as copied, unless the author's -1 had to be swapped for the profile value
+    kept0 = set(rep["kept"]) | ({"raft_first_layer_expansion", "tree_support_wall_count"} - set(rep.get("invalid", [])))
+    rep["replaced"] = [k for k in pool if k in REPORT_REPLACED or k in rep.get("invalid", [])]
+    rep["kept"] = [k for k in pool if (k in kept0 or k in REPORT_COPIED_IDS) and k not in REPORT_REPLACED and k not in rep.get("invalid", [])]
+    rep["discarded"] = [k for k in pool if k not in rep["replaced"] and k not in rep["kept"]]
     rep["no_equivalent"] = []
+
+
+PARAM_GROUPS = (   # the "Print parameters" overview of the web converter
+    ("Quality", "layer_height initial_layer_print_height line_width initial_layer_line_width outer_wall_line_width "
+                "inner_wall_line_width top_surface_line_width sparse_infill_line_width internal_solid_infill_line_width "
+                "seam_position seam_gap"),
+    ("Strength", "wall_loops top_shell_layers bottom_shell_layers sparse_infill_density sparse_infill_pattern "
+                 "top_surface_pattern bottom_surface_pattern"),
+    ("Speed", "outer_wall_speed inner_wall_speed sparse_infill_speed initial_layer_speed travel_speed"),
+    ("Supports", "enable_support support_type support_threshold_angle support_on_build_plate_only support_style"),
+    ("Multi-material", "filament_colour filament_type nozzle_temperature hot_plate_temp filament_map flush_volumes_matrix"),
+)
+_MM = {"layer_height", "initial_layer_print_height", "line_width", "initial_layer_line_width", "outer_wall_line_width",
+       "inner_wall_line_width", "top_surface_line_width", "sparse_infill_line_width", "internal_solid_infill_line_width"}
+
+
+def _pval(k, v):
+    v = first(v)
+    if k in _MM: return f"{v}mm"
+    if k.endswith("_speed"): return f"{v}mm/s"
+    if k in ("nozzle_temperature", "hot_plate_temp"): return f"{v}\u00b0C"
+    if k == "support_threshold_angle": return f"{v}\u00b0"
+    if k == "support_type" and v == "tree(auto)": return v
+    return str(v)
+
+
+def build_param_groups(rep, R, S, slow_keep):
+    """-> [(group, [(key, value, action)])], action = kept / replaced, like the web converter's overview."""
+    kept = set(rep["kept"]) | {k.split(" -> ")[-1] for k in rep["renamed"]}
+    out = []
+    for g, keys in PARAM_GROUPS:
+        rows = []
+        for k in keys.split():
+            if k not in R:
+                continue
+            if k.endswith("_speed"):
+                a, b = first(S.get(k, R[k])), first(R[k])
+                rows.append((k, _pval(k, b) if k in slow_keep or str(a) == str(b) else f"{_pval(k, a)}\u2192{_pval(k, b)}",
+                             "kept" if k in slow_keep else "replaced"))
+            else:
+                rows.append((k, _pval(k, R[k]), "kept" if k in kept else "replaced"))
+        out.append((g, rows))
+    return out
 
 
 def load_settings(path):
@@ -1350,7 +1417,9 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
     cols = fil_vector(S["filament_colour"], nfil, si, fv)
     R["filament_colour"] = cols
     R["filament_multi_colour"] = [WEB_MULTI_COLOUR] * nfil   # like the web converter (only used by multi-colour filaments)
-    rep["kept"] += ["filament_colour", "filament_multi_colour"]
+    rep["kept"].append("filament_colour")
+    if "filament_multi_colour" in S:
+        rep["replaced"].append("filament_multi_colour")   # the web audit lists it only when the source defines it
     if "filament_colour_type" in S:
         R["filament_colour_type"] = ["1"] * nfil
         rep["replaced"].append("filament_colour_type")
@@ -1390,6 +1459,12 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
 
     # 4) copy the author's settings
     copied_keys = set()
+    slow_keep = slower_author_speeds(S, T)   # designer deliberately went SLOWER than the AD5X preset -> respect it
+    if slow_keep and not keep_speeds:
+        rep["notes"].append(
+            "The designer deliberately lowered some speeds and they are slower than your printer's, so they were kept: "
+            + ", ".join(f"{k} {fmt(v)} mm/s" for k, v in sorted(slow_keep.items()))
+            + ". All other speeds come from your printer's profile.")
     for key, sv in S.items():
         if key in HANDLED:
             continue
@@ -1398,7 +1473,7 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
             rep["no_equivalent"].append(key)
             continue
         motion = tk in PRINT_OPTS and tk not in NOT_SPEED and (tk in MOTION_KEYS or bool(MOTION_RE.search(tk)))
-        carry_motion = motion and keep_speeds
+        carry_motion = motion and (keep_speeds or tk in slow_keep)
         if ((key in DISCARDED or tk in DISCARDED) and not carry_motion and tk not in CARRY_ANYWAY) or key in REPLACED or tk in REPLACED \
                 or key in IDS or (tk in PRINTER_OPTS and tk not in CARRY_ANYWAY) or tk in IDS:
             (rep["replaced"] if (key in REPLACED or tk in REPLACED) else rep["discarded"]).append(key)
@@ -1406,7 +1481,7 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
         if tk in FILAMENT_OPTS and tk not in FILAMENT_KEEP and not BED_RE.match(tk):
             rep["replaced"].append(key)   # calibration of the author's printer/filament preset
             continue
-        if motion and not keep_speeds:
+        if motion and not keep_speeds and tk not in slow_keep:
             rep["discarded"].append(key)
             continue
         val = adapt(tk, sv, T[tk], nfil, si, fv)
@@ -1435,8 +1510,9 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
                     return x
                 new = FIX_DEFAULT.get(tk) or fmt(min(max(n, lo if lo is not None else n), hi if hi is not None else n))
                 if n == -1:
-                    rep["notes"].append(f"{tk}: -1 is Bambu's 'auto' marker, not valid in Orca -> set to Orca "
-                                        f"default {new} (only matters if you use that feature)")
+                    rep["notes"].append(f"{tk}: -1 \u2192 {new}. The slicer does not accept -1 for this setting (Bambu Studio "
+                                        "uses -1 to mean \u201cauto\u201d), so the normal value from this printer\u2019s profile was used.")
+                    rep.setdefault("invalid", []).append(tk)
                 else:
                     rep["warn"].append(f"{tk}: {x} is invalid in Orca (range {lo}..{hi}) -> {new}")
                 return new
@@ -1456,7 +1532,8 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
             tk = RENAMES.get(key, key)
             if tk in R and tk in PRINT_OPTS and tk not in NOT_SPEED and (tk in MOTION_KEYS or MOTION_RE.search(tk)):
                 a, b = first(S[key]), first(R[tk])
-                rep["speeds"].append(f"{tk}: {a} -> {b}" + ("  (same)" if str(a) == str(b) else ""))
+                rep["speeds"].append(f"{tk}: {a} -> {b}" + ("  (kept: designer's slower value)" if tk in slow_keep
+                                                              else "  (same)" if str(a) == str(b) else ""))
 
     # 5) rebuild different_settings_to_system: [process, filament1..N, printer]  (see build_diff_lists)
     if PIN_BASE_PRESET and not keep_speeds:
@@ -1675,18 +1752,41 @@ def _convert(src, dst, template, keep_speeds, prune_unused=True):
                 rep["warn"].append(f"{lab}the prime tower overlaps the model on the AD5X plate - move it in Orca "
                                    "(Prime tower position) before slicing.")
     web_style_groups(rep)
+    rep["params"] = build_param_groups(rep, R, S, slow_keep)
     return rep, R
 
 
 def write_report(path, src, dst, rep):
+    """Same sections and wording as the web converter's result page and audit."""
+    k, r, d = len(rep["kept"]) + len(rep["renamed"]), len(rep["replaced"]), len(rep["discarded"]) + len(rep["no_equivalent"])
     with open(path, "w", encoding="utf-8") as f:
         f.write(f"{src} -> {dst}\n{summary(rep)}\n\n")
-        for k, title in (("warn", "WARNINGS"), ("notes", "NOTES (auto-adjusted, no action needed)"),
-                         ("speeds", "SPEEDS (Bambu values replaced with AD5X values)"),
-                         ("author", "AUTHOR'S OWN CUSTOMISATIONS (differ from their base preset)"), ("kept", "KEPT (author value copied)"),
-                         ("renamed", "RENAMED"), ("replaced", "REPLACED by AD5X preset"),
-                         ("discarded", "DISCARDED (machine / motion / Bambu-only / not in Orca)")):
-            f.write(f"== {title} ({len(rep[k])})\n" + "".join(f"  {x}\n" for x in sorted(set(rep[k]))) + "\n")
+        f.write(f"{k} kept | {r} replaced | {d} discarded\n\n")
+        fil_notes = [x for x in rep["notes"] if x.startswith("filaments:")]
+        notices = rep["warn"] + [x for x in rep["notes"] if not x.startswith("filaments:")]
+        for x in fil_notes:
+            f.write(f"Filaments: {x[len('filaments:'):].strip()}\n\n")
+        f.write(f"== {len(notices)} notice{'s' if len(notices) != 1 else ''} - nothing to do\n")
+        f.write("".join(f"  * {x}\n" for x in notices) + "\n")
+        total = sum(len(rows) for _, rows in rep.get("params", []))
+        f.write(f"== 01 PRINT PARAMETERS ({total} parameters)\n")
+        for g, rows in rep.get("params", []):
+            n_k = sum(1 for _, _, a in rows if a == "kept")
+            n_r = len(rows) - n_k
+            f.write(f"  {g}: {len(rows)} parameters, {n_k} kept" + (f", {n_r} replaced" if n_r else "") + "\n")
+            for key, val, act in rows:
+                f.write(f"    {key:<34}{val:<22}{act}\n")
+        f.write("\n== 02 CONVERSION AUDIT\n")
+        for key, title, sub in (("kept", "Copied", "Parameters copied straight from the original model"),
+                                ("renamed", "Renamed", "Same values, key renamed for the target slicer"),
+                                ("replaced", "Replaced by the profile", "Parameters from the printer's base profile, ignoring the original"),
+                                ("discarded", "Discarded", "Non-transferable parameters (speeds, AMS, machine calibration)")):
+            items = sorted(set(rep[key] + (rep["no_equivalent"] if key == "discarded" else [])))
+            f.write(f"\n{title} ({len(items)}) - {sub}\n" + "".join(f"  {x}\n" for x in items))
+        if rep.get("speeds"):
+            f.write(f"\nSpeeds, original -> AD5X ({len(rep['speeds'])})\n" + "".join(f"  {x}\n" for x in rep["speeds"]))
+        if rep.get("author"):
+            f.write(f"\nAuthor's own customisations ({len(rep['author'])})\n" + "".join(f"  {x}\n" for x in rep["author"]))
 
 
 def main():
